@@ -2,6 +2,29 @@ import { useState, useEffect } from "react";
 
 const API = "https://friendlybets-backend-production.up.railway.app/api";
 
+async function apiFetch(path, opts = {}) {
+  const token = localStorage.getItem("fb_token");
+  const res = await fetch(API + path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...opts.headers }
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+function useApi(path, deps = []) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const reload = () => {
+    setLoading(true);
+    apiFetch(path).then(d => { setData(d); setLoading(false); }).catch(e => { setError(e.message); setLoading(false); });
+  };
+  useEffect(reload, deps);
+  return { data, loading, error, reload };
+}
+
 const MOCK_USER = { id: 1, username: "jdeignan", balance: 340 };
 const MOCK_BETS = [
   { id: 1, title: "Duke vs UNC Spread", category: "factual", description: "Duke -4.5 vs North Carolina. Bet resolves at final buzzer. DraftKings line as of tip-off. Both teams must play for bet to be valid.", type: "spread", isPublic: true, admin: null, startTime: "2026-03-08T19:00:00", endTime: "2026-03-08T21:30:00", amount: 50, participants: ["jdeignan","mikeb","sarah_k","tomh"], myPick: "Duke -4.5", status: "live", result: null, odds: { home: "Duke -4.5", away: "UNC +4.5" } },
@@ -109,18 +132,56 @@ function BetCard({ bet, onResolve }) {
   );
 }
 
-function CreateModal({ onClose }) {
+function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "" });
+  const [inviteSearch, setInviteSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [invitees, setInvitees] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [done, setDone] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const searchUsers = async (q) => {
+    setInviteSearch(q);
+    if (q.length < 2) { setSearchResults([]); return; }
+    try {
+      const res = await apiFetch(`/users/search?q=${encodeURIComponent(q)}`);
+      setSearchResults(res.filter(u => !invitees.find(i => i.id === u.id)));
+    } catch {}
+  };
+
+  const addInvitee = (u) => { setInvitees(i => [...i, u]); setSearchResults([]); setInviteSearch(""); };
+  const removeInvitee = (id) => setInvitees(i => i.filter(u => u.id !== id));
+
+  const handleCreate = async () => {
+    if (!form.amount) return;
+    setSaving(true);
+    try {
+      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({ title: form.title, description: form.description, category: form.category, amount: Number(form.amount), endTime: form.endDate || null, isPublic: form.isPublic }) });
+      if (invitees.length > 0) {
+        await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
+      }
+      setDone(true);
+      setTimeout(() => { onCreated && onCreated(); onClose(); }, 1200);
+    } catch { setSaving(false); }
+  };
+
+  if (done) return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ textAlign: "center" }}><div style={{ fontSize: 56, marginBottom: 12 }}>🎯</div><div style={{ fontSize: 20, fontWeight: 800, color: C.green }}>Bet Created!</div></div>
+    </div>
+  );
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: C.card, borderRadius: "24px 24px 0 0", padding: "28px 24px 44px", width: "100%", maxWidth: 480, border: `1px solid ${C.border}` }}>
+      <div style={{ background: C.card, borderRadius: "24px 24px 0 0", padding: "28px 24px 44px", width: "100%", maxWidth: 480, border: `1px solid ${C.border}`, maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <div><div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>New Bet</div><div style={{ fontSize: 10, color: C.muted, letterSpacing: 1 }}>STEP {step} OF 3</div></div>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", background: "#1e2330", border: "none", color: C.muted, fontSize: 16, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 4, marginBottom: 24 }}>{[1,2,3].map(s => <div key={s} style={{ flex: 1, height: 3, borderRadius: 2, background: s <= step ? C.green : C.border }} />)}</div>
+
         {step === 1 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>What kind of bet?</div>
@@ -132,11 +193,12 @@ function CreateModal({ onClose }) {
             ))}
           </div>
         )}
+
         {step === 2 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Bet Details</div>
             <input placeholder="Bet title" value={form.title} onChange={e => set("title", e.target.value)} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
-            <textarea placeholder="Description — terms, rules, how it resolves..." value={form.description} onChange={e => set("description", e.target.value)} rows={4} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
+            <textarea placeholder="Description — terms, rules, how it resolves..." value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
             <div style={{ display: "flex", gap: 10 }}>
               {["Public","Private"].map(opt => (
                 <button key={opt} onClick={() => set("isPublic", opt==="Public")} style={{ flex: 1, padding: 10, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: (opt==="Public")===form.isPublic ? C.green+"15" : "#0d0f14", border: `1px solid ${(opt==="Public")===form.isPublic ? C.green : C.border}`, color: (opt==="Public")===form.isPublic ? C.green : C.muted }}>
@@ -147,12 +209,51 @@ function CreateModal({ onClose }) {
             <button onClick={() => setStep(3)} disabled={!form.title} style={{ padding: 14, borderRadius: 12, background: form.title ? C.green+"20" : "#1e2330", border: `1px solid ${form.title ? C.green : C.border}`, color: form.title ? C.green : C.muted, fontWeight: 700, fontSize: 14, cursor: form.title ? "pointer" : "not-allowed", fontFamily: "inherit" }}>Continue →</button>
           </div>
         )}
+
         {step === 3 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager & Timing</div>
-            <div><div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>WAGER PER PERSON ($)</div><input type="number" placeholder="25" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} /></div>
-            <div><div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div><input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} /></div>
-            <button onClick={onClose} style={{ padding: 14, borderRadius: 12, background: C.green+"20", border: `1px solid ${C.green}`, color: C.green, fontWeight: 800, fontSize: 14, cursor: "pointer", fontFamily: "inherit", marginTop: 8 }}>🎯 Create Bet</button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager, Timing & Invite</div>
+            <div>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>WAGER PER PERSON ($)</div>
+              <input type="number" placeholder="25" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
+              <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+            </div>
+
+            {/* Invite by username */}
+            <div>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>INVITE FRIENDS (optional)</div>
+              <input placeholder="Search by username..." value={inviteSearch} onChange={e => searchUsers(e.target.value)}
+                style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+              {searchResults.length > 0 && (
+                <div style={{ background: "#0a0c12", border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+                  {searchResults.map(u => (
+                    <div key={u.id} onClick={() => addInvitee(u)}
+                      style={{ padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, borderBottom: `1px solid ${C.border}` }}>
+                      <Avatar name={u.username} size={28} color={C.blue} />
+                      <span style={{ fontSize: 13, color: C.text }}>@{u.username}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {invitees.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                  {invitees.map(u => (
+                    <span key={u.id} onClick={() => removeInvitee(u.id)}
+                      style={{ fontSize: 11, color: C.green, background: C.green+"15", border: `1px solid ${C.green}30`, padding: "4px 10px", borderRadius: 20, cursor: "pointer" }}>
+                      @{u.username} ✕
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button onClick={handleCreate} disabled={!form.amount || saving}
+              style={{ padding: 14, borderRadius: 12, background: form.amount && !saving ? C.green+"20" : "#1e2330", border: `1px solid ${form.amount && !saving ? C.green : C.border}`, color: form.amount && !saving ? C.green : C.muted, fontWeight: 800, fontSize: 14, cursor: form.amount && !saving ? "pointer" : "not-allowed", fontFamily: "inherit", marginTop: 4 }}>
+              {saving ? "Creating..." : "🎯 Create Bet"}
+            </button>
           </div>
         )}
       </div>
@@ -161,44 +262,106 @@ function CreateModal({ onClose }) {
 }
 
 function HomeScreen({ user, onLogout, onResolve }) {
-  const active = MOCK_BETS.filter(b => b.status !== "settled");
+  const { data: bets, loading, reload } = useApi("/bets");
+  const [tab, setTab] = useState("active");
+  const allBets = bets || [];
+  const tabs = { active: allBets.filter(b => b.status === "active"), live: allBets.filter(b => b.status === "live"), settled: allBets.filter(b => b.status === "settled") };
+  const shown = tabs[tab] || [];
+  const inPlay = allBets.filter(b => b.status !== "settled").reduce((s, b) => s + b.amount * (b.participant_count || 1), 0);
+
   return (
     <div style={{ padding: "20px 16px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <div><div style={{ fontSize: 24, fontWeight: 800, color: C.text }}>My Bets</div><div style={{ fontSize: 11, color: C.muted }}>{active.length} active · ${active.reduce((s,b)=>s+b.amount*b.participants.length,0)} in play</div></div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}><Avatar name={user?.username || "?"} size={42} color={user?.avatarColor || C.green} /><button onClick={onLogout} style={{ background: "none", border: "1px solid #1e2330", borderRadius: 8, color: "#4a5068", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>Sign out</button></div>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: C.text }}>My Bets</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{allBets.filter(b=>b.status!=="settled").length} active · ${inPlay} in play</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Avatar name={user?.username || "?"} size={42} animalId={user?.animal_id} color={user?.avatarColor || C.green} />
+          <button onClick={onLogout} style={{ background: "none", border: "1px solid #1e2330", borderRadius: 8, color: "#4a5068", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        {[["$"+MOCK_USER.balance,"Balance",C.green],[active.length,"Active",C.blue],[MOCK_INVITES.length,"Invites",C.gold]].map(([v,l,c]) => (
+
+      {/* Stats row */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        {[["$"+(user?.balance||0),"Balance",C.green],[tabs.active.length,"Active",C.blue],[tabs.live.length,"Live",C.red]].map(([v,l,c]) => (
           <div key={l} style={{ flex: 1, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 12px", textAlign: "center" }}>
             <div style={{ fontSize: 20, fontWeight: 800, color: c }}>{v}</div>
             <div style={{ fontSize: 9, color: C.muted, letterSpacing: 0.5 }}>{l}</div>
           </div>
         ))}
       </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, background: C.card, borderRadius: 12, padding: 4 }}>
+        {[["active","Active"],["live","● Live"],["settled","Settled"]].map(([k,label]) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
+              background: tab===k ? (k==="live" ? C.red+"20" : C.green+"20") : "transparent",
+              color: tab===k ? (k==="live" ? C.red : C.green) : C.muted }}>
+            {label} {tabs[k]?.length > 0 ? `(${tabs[k].length})` : ""}
+          </button>
+        ))}
+      </div>
+
+      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading bets...</div>}
+      {!loading && shown.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: C.muted }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>{tab==="live" ? "📡" : tab==="settled" ? "📋" : "🎯"}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No {tab} bets yet</div>
+          <div style={{ fontSize: 12 }}>Tap + to create one!</div>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {MOCK_BETS.map(bet => <BetCard key={bet.id} bet={bet} onResolve={onResolve} />)}
+        {shown.map(bet => <BetCard key={bet.id} bet={{
+          ...bet,
+          participants: Array(bet.participant_count || 1).fill(""),
+          myPick: bet.my_pick,
+          endTime: bet.end_time,
+          startTime: bet.start_time,
+          isPublic: bet.is_public,
+        }} onResolve={(b) => { onResolve(b); }} onResolved={reload} />)}
       </div>
     </div>
   );
 }
 
 function InvitesScreen() {
+  const { data: invites, loading, reload } = useApi("/invites");
+  const list = invites || [];
+
+  const respond = async (id, action) => {
+    try {
+      await apiFetch(`/invites/${id}/${action}`, { method: "POST" });
+      reload();
+    } catch {}
+  };
+
   return (
     <div style={{ padding: "20px 16px" }}>
       <div style={{ fontSize: 24, fontWeight: 800, color: C.text, marginBottom: 4 }}>Invites</div>
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 20 }}>{MOCK_INVITES.length} pending</div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 20 }}>{list.length} pending</div>
+      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>}
+      {!loading && list.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: C.muted }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>✉️</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>No pending invites</div>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {MOCK_INVITES.map(inv => (
+        {list.map(inv => (
           <div key={inv.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: "16px 18px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <div><div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div><div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from}</span> · {inv.participants} joined</div></div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div>
+                <div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from_username}</span> · {inv.participant_count} joined</div>
+              </div>
               <div style={{ textAlign: "right" }}><div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div><div style={{ fontSize: 9, color: C.muted }}>WAGER</div></div>
             </div>
-            <div style={{ fontSize: 10, color: C.gold, marginBottom: 12 }}>Expires {new Date(inv.expires).toLocaleDateString()}</div>
+            {inv.end_time && <div style={{ fontSize: 10, color: C.gold, marginBottom: 12 }}>Ends {new Date(inv.end_time).toLocaleDateString()}</div>}
             <div style={{ display: "flex", gap: 8 }}>
-              <button style={{ flex: 1, padding: 10, borderRadius: 10, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Accept</button>
-              <button style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕ Decline</button>
+              <button onClick={() => respond(inv.id, "accept")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Accept</button>
+              <button onClick={() => respond(inv.id, "decline")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕ Decline</button>
             </div>
           </div>
         ))}
@@ -723,7 +886,7 @@ export default function FriendlyBets() {
             {screen === "invites" && <InvitesScreen />}
             {screen === "history" && <HistoryScreen />}
           </div>
-          {showCreate && <CreateModal onClose={() => setShowCreate(false)} />}
+          {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setScreen("home"); }} />}
           {resolveBet && <ResolveModal bet={resolveBet} onClose={() => setResolveBet(null)} />}
           <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 390, background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 8px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100 }}>
             {nav.map(([k,icon,label]) => (
