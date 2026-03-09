@@ -857,14 +857,38 @@ function ResolveModal({ bet, onClose }) {
 }
 
 export default function FriendlyBets() {
-  const [authScreen, setAuthScreen] = useState("splash"); // splash | login | signup
+  const [authScreen, setAuthScreen] = useState("splash");
   const [currentUser, setCurrentUser] = useState(null);
   const [screen, setScreen] = useState("home");
   const [showCreate, setShowCreate] = useState(false);
   const [resolveBet, setResolveBet] = useState(null);
+  const [booting, setBooting] = useState(true);
+
+  // Auto-login if token exists
+  useEffect(() => {
+    const token = localStorage.getItem("fb_token");
+    if (!token) { setBooting(false); return; }
+    apiFetch("/me").then(user => {
+      setCurrentUser({ ...user, avatarColor: user.avatar_color });
+      setAuthScreen(null);
+      setBooting(false);
+    }).catch(() => {
+      localStorage.removeItem("fb_token");
+      setBooting(false);
+    });
+  }, []);
 
   const handleLogin = (user) => { setCurrentUser(user); setAuthScreen(null); };
-  const handleLogout = () => { setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
+  const handleLogout = () => { localStorage.removeItem("fb_token"); setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
+
+  if (booting) return (
+    <div style={{ maxWidth: 390, margin: "0 auto", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>🤝</div>
+        <div style={{ fontSize: 14, color: "#4a5068" }}>Loading...</div>
+      </div>
+    </div>
+  );
 
   const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["history","◈","History"]];
 
