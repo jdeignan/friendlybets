@@ -51,44 +51,128 @@ function CatBadge({ category }) {
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, color: isA ? C.purple : C.blue, background: isA ? C.purple+"18" : C.blue+"18", border: `1px solid ${isA ? C.purple : C.blue}30`, padding: "2px 7px", borderRadius: 20 }}>{isA ? "👑 ADMIN" : "⚡ FACTUAL"}</span>;
 }
 
-function Modal({ bet, onClose, onResolve }) {
+function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [update, setUpdate] = useState("");
+  const [updates, setUpdates] = useState(bet.updates ? JSON.parse(bet.updates) : []);
+  const [postingUpdate, setPostingUpdate] = useState(false);
+  const isCreator = currentUser && (bet.creator_name === currentUser.username || bet.admin_id === currentUser.id);
+
+  const formatDate = (t) => {
+    if (!t) return "Not set";
+    const d = new Date(t);
+    if (isNaN(d.getTime()) || d.getFullYear() < 2000) return "Not set";
+    return d.toLocaleString();
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      await apiFetch(`/bets/${bet.id}`, { method: "DELETE" });
+      onDeleted && onDeleted();
+      onClose();
+    } catch { setDeleting(false); }
+  };
+
+  const postUpdate = async () => {
+    if (!update.trim()) return;
+    setPostingUpdate(true);
+    const newUpdate = { text: update, author: currentUser?.username, time: new Date().toISOString() };
+    const newUpdates = [...updates, newUpdate];
+    try {
+      await apiFetch(`/bets/${bet.id}/update`, { method: "POST", body: JSON.stringify({ update: update }) });
+      setUpdates(newUpdates);
+      setUpdate("");
+    } catch {}
+    setPostingUpdate(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={onClose}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>BET DETAILS</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 16 }}>{bet.title}</div>
         <div style={{ fontSize: 13, color: "#9aa0b8", lineHeight: 1.7, marginBottom: 20 }}>{bet.description}</div>
+
+        {/* Dates */}
         <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
           {[["STARTS", bet.startTime], ["ENDS", bet.endTime]].map(([l, t]) => (
             <div key={l} style={{ flex: 1, background: "#0d0f14", borderRadius: 10, padding: "10px 14px" }}>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 4 }}>{l}</div>
-              <div style={{ fontSize: 11, color: C.text }}>{new Date(t).toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: C.text }}>{formatDate(t)}</div>
             </div>
           ))}
         </div>
+
+        {/* Participants */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>PARTICIPANTS ({bet.participants.length})</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{bet.participants.map(p => <span key={p} style={{ fontSize: 11, color: C.text, background: "#1e2330", padding: "4px 10px", borderRadius: 20 }}>@{p}</span>)}</div>
+          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>PARTICIPANTS ({bet.participants_list?.length || bet.participants.length})</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(bet.participants_list || bet.participants).map(p => (
+              <span key={p} style={{ fontSize: 11, color: C.text, background: "#1e2330", padding: "4px 10px", borderRadius: 20 }}>@{p}</span>
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {bet.category === "admin" && bet.status !== "settled" && (
-            <button onClick={() => { onClose(); onResolve && onResolve(bet); }} style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>🏆 Settle</button>
+
+        {/* Progress updates for admin bets */}
+        {bet.category === "admin" && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>📊 PROGRESS UPDATES</div>
+            {updates.length === 0 && <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>No updates yet</div>}
+            {updates.map((u, i) => (
+              <div key={i} style={{ background: "#0d0f14", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: C.text, marginBottom: 4 }}>{u.text}</div>
+                <div style={{ fontSize: 9, color: C.muted }}>@{u.author} · {new Date(u.time).toLocaleDateString()}</div>
+              </div>
+            ))}
+            {isCreator && bet.status !== "settled" && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input value={update} onChange={e => setUpdate(e.target.value)} placeholder="Post an update..."
+                  style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                <button onClick={postUpdate} disabled={postingUpdate || !update.trim()}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "none", background: C.blue+"20", color: C.blue, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                  {postingUpdate ? "..." : "Post"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {bet.category === "admin" && bet.status !== "settled" && isCreator && (
+            <button onClick={() => { onClose(); onResolve && onResolve(bet); }}
+              style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              🏆 Settle
+            </button>
           )}
-          <button onClick={onClose} style={{ flex: 1, padding: 12, borderRadius: 12, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+          {isCreator && bet.status !== "settled" && (
+            <button onClick={handleDelete} disabled={deleting}
+              style={{ flex: 1, padding: 12, borderRadius: 12, background: confirmDelete ? C.red+"25" : C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              {deleting ? "Deleting..." : confirmDelete ? "Confirm Delete" : "🗑 Delete"}
+            </button>
+          )}
+          <button onClick={onClose}
+            style={{ flex: 1, padding: 12, borderRadius: 12, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+            Close
+          </button>
         </div>
+        {confirmDelete && <div style={{ fontSize: 11, color: C.red, textAlign: "center", marginTop: 8 }}>Tap again to confirm — this cannot be undone</div>}
       </div>
     </div>
   );
 }
 
-function BetCard({ bet, onResolve }) {
+function BetCard({ bet, onResolve, onDeleted, currentUser }) {
   const [show, setShow] = useState(false);
   const pot = bet.amount * bet.participants.length;
   const diff = new Date(bet.endTime) - new Date();
   const timeLeft = diff < 0 ? "Ended" : diff < 3600000 ? `${Math.floor(diff/60000)}m left` : diff < 86400000 ? `${Math.floor(diff/3600000)}h left` : `${Math.floor(diff/86400000)}d left`;
   return (
     <>
-      {show && <Modal bet={bet} onClose={() => setShow(false)} />}
+      {show && <Modal bet={bet} onClose={() => setShow(false)} onResolve={onResolve} onDeleted={onDeleted} currentUser={currentUser} />}
       <div style={{ background: C.card, border: `1px solid ${bet.status==="live" ? C.red+"44" : C.border}`, borderRadius: 16, padding: "16px 18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -210,6 +294,7 @@ function CreateModal({ onClose, onCreated }) {
             <div>
               <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
               <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
             </div>
 
             {/* Invite by username */}
@@ -310,7 +395,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
           endTime: bet.end_time,
           startTime: bet.start_time,
           isPublic: bet.is_public,
-        }} onResolve={(b) => { onResolve(b); }} onResolved={reload} />)}
+        }} onResolve={(b) => { onResolve(b); }} onDeleted={reload} currentUser={user} />)}
       </div>
     </div>
   );
