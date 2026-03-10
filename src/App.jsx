@@ -213,7 +213,7 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
 
 function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "" });
   const [inviteSearch, setInviteSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [invitees, setInvitees] = useState([]);
@@ -302,7 +302,7 @@ function CreateModal({ onClose, onCreated }) {
     if (!form.amount) return;
     setSaving(true);
     try {
-      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({ title: form.title, description: form.description, category: form.category, amount: Number(form.amount), endTime: form.endDate || null, isPublic: form.isPublic }) });
+      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({ title: form.title, description: form.description, category: form.category, amount: Number(form.amount), endTime: form.endDate || null, isPublic: form.isPublic, myPick: form.my_pick || null, oddsHome: form.odds_home || null, oddsAway: form.odds_away || null, homeTeam: form.home_team || null, awayTeam: form.away_team || null }) });
       if (invitees.length > 0) {
         await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
       }
@@ -386,15 +386,25 @@ function CreateModal({ onClose, onCreated }) {
             <input placeholder="Bet title" value={form.title} onChange={e => set("title", e.target.value)} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
             <textarea placeholder="Description — terms, rules, how it resolves..." value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
 
-            {/* Show selected odds */}
+            {/* Show selected odds + pick your side */}
             {form.odds_home && (
-              <div style={{ display: "flex", gap: 8 }}>
-                {[[form.home_team, form.odds_home, C.blue],[form.away_team, form.odds_away, C.text]].map(([team,odds,c]) => (
-                  <div key={team} style={{ flex: 1, background: "#0d0f14", border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>{team}</div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: c }}>{odds}</div>
-                  </div>
-                ))}
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>PICK YOUR SIDE</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[[form.home_team, form.odds_home, C.blue],[form.away_team, form.odds_away, C.purple]].map(([team,odds,c]) => {
+                    const pickLabel = `${team} ${odds}`;
+                    const isSelected = form.my_pick === pickLabel;
+                    return (
+                      <button key={team} onClick={() => set("my_pick", isSelected ? "" : pickLabel)}
+                        style={{ flex: 1, background: isSelected ? c+"20" : "#0d0f14", border: `2px solid ${isSelected ? c : C.border}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                        <div style={{ fontSize: 10, color: isSelected ? c : C.muted, marginBottom: 4 }}>{team}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: isSelected ? c : C.text }}>{odds}</div>
+                        {isSelected && <div style={{ fontSize: 9, color: c, marginTop: 4 }}>✓ MY PICK</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!form.my_pick && <div style={{ fontSize: 10, color: C.gold, marginTop: 6 }}>Tap a side to lock in your pick</div>}
               </div>
             )}
 
