@@ -25,17 +25,7 @@ function useApi(path, deps = []) {
   return { data, loading, error, reload };
 }
 
-const MOCK_USER = { id: 1, username: "jdeignan", balance: 340 };
-const MOCK_BETS = [
-  { id: 1, title: "Duke vs UNC Spread", category: "factual", description: "Duke -4.5 vs North Carolina. Bet resolves at final buzzer. DraftKings line as of tip-off. Both teams must play for bet to be valid.", type: "spread", isPublic: true, admin: null, startTime: "2026-03-08T19:00:00", endTime: "2026-03-08T21:30:00", amount: 50, participants: ["jdeignan","mikeb","sarah_k","tomh"], myPick: "Duke -4.5", status: "live", result: null, odds: { home: "Duke -4.5", away: "UNC +4.5" } },
-  { id: 2, title: "March Weight Loss Challenge", category: "admin", description: "Whoever loses the highest % of body weight by March 31st wins the pot. Each participant must submit weekly weigh-ins via photo to admin. Starting weights confirmed by March 8th. Admin (jdeignan) resolves on April 1st.", type: "custom", isPublic: false, admin: "jdeignan", startTime: "2026-03-08T00:00:00", endTime: "2026-03-31T23:59:00", amount: 100, participants: ["jdeignan","mikeb","sarah_k","tomh","lizz","pauld"], myPick: "Entered", status: "active", result: null },
-  { id: 3, title: "Celtics ML Tonight", category: "factual", description: "Boston Celtics moneyline vs Miami Heat. -180 favorite. Bet resolves at final whistle of regulation or OT.", type: "moneyline", isPublic: true, admin: null, startTime: "2026-03-08T20:00:00", endTime: "2026-03-08T22:30:00", amount: 25, participants: ["jdeignan","tomh"], myPick: "Celtics ML", status: "live", result: null, odds: { home: "Celtics -180", away: "Heat +155" } },
-  { id: 4, title: "Super Bowl MVP Prop", category: "admin", description: "Who will win Super Bowl MVP? Admin resolves after game ends.", type: "custom", isPublic: true, admin: "mikeb", startTime: "2026-02-09T18:00:00", endTime: "2026-02-09T22:00:00", amount: 20, participants: ["jdeignan","mikeb","sarah_k"], myPick: "Mahomes", status: "settled", result: "mikeb won $40" },
-];
-const MOCK_INVITES = [
-  { id: 5, title: "NCAA Tournament Bracket Challenge", from: "sarah_k", amount: 25, expires: "2026-03-20T12:00:00", participants: 8 },
-  { id: 6, title: "Golf Weekend Closest to Pin", from: "pauld", amount: 50, expires: "2026-03-15T08:00:00", participants: 4 },
-];
+
 
 const C = { bg: "#0d0f14", card: "#13161e", border: "#1e2330", green: "#00e676", red: "#ff4d6d", gold: "#ffd166", blue: "#4cc9f0", purple: "#a78bfa", text: "#e8eaf0", muted: "#4a5068" };
 
@@ -61,44 +51,132 @@ function CatBadge({ category }) {
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, color: isA ? C.purple : C.blue, background: isA ? C.purple+"18" : C.blue+"18", border: `1px solid ${isA ? C.purple : C.blue}30`, padding: "2px 7px", borderRadius: 20 }}>{isA ? "👑 ADMIN" : "⚡ FACTUAL"}</span>;
 }
 
-function Modal({ bet, onClose, onResolve }) {
+function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [update, setUpdate] = useState("");
+  const [updates, setUpdates] = useState(bet.updates ? JSON.parse(bet.updates) : []);
+  const [postingUpdate, setPostingUpdate] = useState(false);
+  const isCreator = currentUser && (bet.creator_name === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
+
+  const formatDate = (t) => {
+    if (!t) return "Not set";
+    const d = new Date(t);
+    if (isNaN(d.getTime()) || d.getFullYear() < 2000) return "Not set";
+    return d.toLocaleString();
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      await apiFetch(`/bets/${bet.id}`, { method: "DELETE" });
+      onClose();
+      if (onDeleted) { onDeleted(); } else { window.location.reload(); }
+    } catch (e) { 
+      console.error("Delete failed:", e);
+      setDeleting(false); 
+      setConfirmDelete(false);
+    }
+  };
+
+  const postUpdate = async () => {
+    if (!update.trim()) return;
+    setPostingUpdate(true);
+    const newUpdate = { text: update, author: currentUser?.username, time: new Date().toISOString() };
+    const newUpdates = [...updates, newUpdate];
+    try {
+      await apiFetch(`/bets/${bet.id}/update`, { method: "POST", body: JSON.stringify({ update: update }) });
+      setUpdates(newUpdates);
+      setUpdate("");
+    } catch {}
+    setPostingUpdate(false);
+  };
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={onClose}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>BET DETAILS</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 16 }}>{bet.title}</div>
         <div style={{ fontSize: 13, color: "#9aa0b8", lineHeight: 1.7, marginBottom: 20 }}>{bet.description}</div>
+
+        {/* Dates */}
         <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
           {[["STARTS", bet.startTime], ["ENDS", bet.endTime]].map(([l, t]) => (
             <div key={l} style={{ flex: 1, background: "#0d0f14", borderRadius: 10, padding: "10px 14px" }}>
               <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 4 }}>{l}</div>
-              <div style={{ fontSize: 11, color: C.text }}>{new Date(t).toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: C.text }}>{formatDate(t)}</div>
             </div>
           ))}
         </div>
+
+        {/* Participants */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>PARTICIPANTS ({bet.participants.length})</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{bet.participants.map(p => <span key={p} style={{ fontSize: 11, color: C.text, background: "#1e2330", padding: "4px 10px", borderRadius: 20 }}>@{p}</span>)}</div>
+          <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>PARTICIPANTS ({bet.participants_list?.length || bet.participants.length})</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(bet.participants_list || bet.participants).map(p => (
+              <span key={p} style={{ fontSize: 11, color: C.text, background: "#1e2330", padding: "4px 10px", borderRadius: 20 }}>@{p}</span>
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          {bet.category === "admin" && bet.status !== "settled" && (
-            <button onClick={() => { onClose(); onResolve && onResolve(bet); }} style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>🏆 Settle</button>
+
+        {/* Progress updates for admin bets */}
+        {bet.category === "admin" && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>📊 PROGRESS UPDATES</div>
+            {updates.length === 0 && <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>No updates yet</div>}
+            {updates.map((u, i) => (
+              <div key={i} style={{ background: "#0d0f14", borderRadius: 10, padding: "10px 12px", marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: C.text, marginBottom: 4 }}>{u.text}</div>
+                <div style={{ fontSize: 9, color: C.muted }}>@{u.author} · {new Date(u.time).toLocaleDateString()}</div>
+              </div>
+            ))}
+            {isCreator && bet.status !== "settled" && (
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <input value={update} onChange={e => setUpdate(e.target.value)} placeholder="Post an update..."
+                  style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
+                <button onClick={postUpdate} disabled={postingUpdate || !update.trim()}
+                  style={{ padding: "10px 14px", borderRadius: 10, border: "none", background: C.blue+"20", color: C.blue, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                  {postingUpdate ? "..." : "Post"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {bet.category === "admin" && bet.status !== "settled" && isCreator && (
+            <button onClick={() => { onClose(); onResolve && onResolve(bet); }}
+              style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              🏆 Settle
+            </button>
           )}
-          <button onClick={onClose} style={{ flex: 1, padding: 12, borderRadius: 12, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Close</button>
+          {isCreator && bet.status !== "settled" && (
+            <button onClick={handleDelete} disabled={deleting}
+              style={{ flex: 1, padding: 12, borderRadius: 12, background: confirmDelete ? C.red+"25" : C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+              {deleting ? "Deleting..." : confirmDelete ? "Confirm Delete" : "🗑 Delete"}
+            </button>
+          )}
+          <button onClick={onClose}
+            style={{ flex: 1, padding: 12, borderRadius: 12, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
+            Close
+          </button>
         </div>
+        {confirmDelete && <div style={{ fontSize: 11, color: C.red, textAlign: "center", marginTop: 8 }}>Tap again to confirm — this cannot be undone</div>}
       </div>
     </div>
   );
 }
 
-function BetCard({ bet, onResolve }) {
+function BetCard({ bet, onResolve, onDeleted, currentUser }) {
   const [show, setShow] = useState(false);
   const pot = bet.amount * bet.participants.length;
   const diff = new Date(bet.endTime) - new Date();
   const timeLeft = diff < 0 ? "Ended" : diff < 3600000 ? `${Math.floor(diff/60000)}m left` : diff < 86400000 ? `${Math.floor(diff/3600000)}h left` : `${Math.floor(diff/86400000)}d left`;
   return (
     <>
-      {show && <Modal bet={bet} onClose={() => setShow(false)} />}
+      {show && <Modal bet={bet} onClose={() => setShow(false)} onResolve={onResolve} onDeleted={onDeleted} currentUser={currentUser} />}
       <div style={{ background: C.card, border: `1px solid ${bet.status==="live" ? C.red+"44" : C.border}`, borderRadius: 16, padding: "16px 18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -220,6 +298,7 @@ function CreateModal({ onClose, onCreated }) {
             <div>
               <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
               <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+              <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
             </div>
 
             {/* Invite by username */}
@@ -320,7 +399,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
           endTime: bet.end_time,
           startTime: bet.start_time,
           isPublic: bet.is_public,
-        }} onResolve={(b) => { onResolve(b); }} onResolved={reload} />)}
+        }} onResolve={(b) => { onResolve(b); }} onDeleted={reload} currentUser={user} />)}
       </div>
     </div>
   );
@@ -371,78 +450,108 @@ function InvitesScreen() {
 }
 
 function LiveScreen() {
-  const live = MOCK_BETS.filter(b => b.status === "live");
+  const { data: bets, loading } = useApi("/bets");
+  const live = (bets || []).filter(b => b.status === "live");
   return (
     <div style={{ padding: "20px 16px" }}>
       <div style={{ fontSize: 24, fontWeight: 800, color: C.text, marginBottom: 4 }}>Live Now</div>
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 20 }}>{live.length} bets in progress</div>
+      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>}
+      {!loading && live.length === 0 && (
+        <div style={{ textAlign: "center", padding: "40px 20px", color: C.muted }}>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>📡</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>No live bets right now</div>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {live.map(bet => (
-          <div key={bet.id} style={{ background: C.card, border: `1px solid ${C.red}33`, borderRadius: 16, padding: "16px 18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}><div style={{ fontSize: 15, fontWeight: 700, color: C.text }}>{bet.title}</div><Pill status="live" /></div>
-            {bet.odds && <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>{[bet.odds.home, bet.odds.away].map((o,i) => <div key={i} style={{ flex: 1, background: "#0d0f14", borderRadius: 10, padding: "8px 12px", textAlign: "center" }}><div style={{ fontSize: 12, fontWeight: 700, color: i===0?C.blue:C.text }}>{o}</div></div>)}</div>}
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted }}><span>My pick: <span style={{ color: C.blue }}>{bet.myPick}</span></span><span style={{ color: C.green }}>${bet.amount * bet.participants.length} pot</span></div>
-          </div>
+          <BetCard key={bet.id} bet={{
+            ...bet,
+            participants: Array(bet.participant_count || 1).fill(""),
+            myPick: bet.my_pick,
+            endTime: bet.end_time,
+            startTime: bet.start_time,
+            isPublic: bet.is_public,
+          }} />
         ))}
       </div>
     </div>
   );
 }
 
-// All unique users across all bets except current user
-const ALL_USERS = [...new Set(MOCK_BETS.flatMap(b => b.participants))].filter(u => u !== MOCK_USER.username);
 
-// Per-user head to head stats (mock)
-const USER_STATS = {
-  mikeb:   { wins: 3, losses: 2, net: +75,  bets: 5 },
-  sarah_k: { wins: 1, losses: 3, net: -40,  bets: 4 },
-  tomh:    { wins: 4, losses: 1, net: +120, bets: 5 },
-  lizz:    { wins: 2, losses: 2, net: 0,    bets: 4 },
-  pauld:   { wins: 1, losses: 1, net: -20,  bets: 2 },
-};
 
 function HistoryScreen() {
+  const { data: bets, loading } = useApi("/bets");
   const [filterUser, setFilterUser] = useState(null);
-  const months = ["Oct","Nov","Dec","Jan","Feb","Mar"];
-  const amounts = [80, 120, 95, 210, 145, 340];
-  const max = Math.max(...amounts);
+  const allBets = bets || [];
 
-  const settled = MOCK_BETS.filter(b => b.status === "settled");
+  // Get all settled bets
+  const settled = allBets.filter(b => b.status === "settled");
+
+  // Build opponent list from settled bets
+  const opponents = [...new Set(
+    settled.flatMap(b => (b.participants_list || []).filter(p => p !== b.my_username))
+  )];
+
+  // Filter by opponent if selected
   const filtered = filterUser
-    ? settled.filter(b => b.participants.includes(filterUser))
+    ? settled.filter(b => (b.participants_list || []).includes(filterUser))
     : settled;
 
-  const h2h = filterUser ? USER_STATS[filterUser] : null;
+  // Compute H2H stats from real data
+  const h2h = filterUser ? (() => {
+    const shared = settled.filter(b => (b.participants_list || []).includes(filterUser));
+    const wins = shared.filter(b => b.result && b.result.includes("won") && b.creator_name !== filterUser).length;
+    const losses = shared.length - wins;
+    return { wins, losses, bets: shared.length };
+  })() : null;
+
+  // Monthly chart from real data
+  const monthlyData = (() => {
+    const map = {};
+    allBets.forEach(b => {
+      if (!b.created_at) return;
+      const d = new Date(b.created_at);
+      const key = d.toLocaleString("default", { month: "short" });
+      map[key] = (map[key] || 0) + b.amount;
+    });
+    const months = Object.keys(map).slice(-6);
+    const amounts = months.map(m => map[m]);
+    return { months, amounts };
+  })();
+  const max = Math.max(...(monthlyData.amounts.length ? monthlyData.amounts : [1]));
 
   return (
     <div style={{ padding: "20px 16px" }}>
       <div style={{ fontSize: 24, fontWeight: 800, color: C.text, marginBottom: 4 }}>History</div>
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 16 }}>Your betting record</div>
 
-      {/* User filter pills */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>FILTER BY OPPONENT</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={() => setFilterUser(null)}
-            style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${!filterUser ? C.green : C.border}`, background: !filterUser ? C.green+"15" : "transparent", color: !filterUser ? C.green : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-            All
-          </button>
-          {ALL_USERS.map(u => {
-            const st = USER_STATS[u];
-            const isSelected = filterUser === u;
-            const netColor = !st ? C.muted : st.net > 0 ? C.green : st.net < 0 ? C.red : C.muted;
-            return (
-              <button key={u} onClick={() => setFilterUser(isSelected ? null : u)}
-                style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${isSelected ? C.blue : C.border}`, background: isSelected ? C.blue+"15" : "transparent", color: isSelected ? C.blue : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-                @{u}
-                {st && <span style={{ fontSize: 9, color: netColor }}>{st.net > 0 ? "+" : ""}{st.net === 0 ? "±" : ""}{st.net !== 0 ? "$"+Math.abs(st.net) : "$0"}</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>}
 
-      {/* H2H stats when user is selected */}
+      {/* Opponent filter pills */}
+      {opponents.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>FILTER BY OPPONENT</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => setFilterUser(null)}
+              style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${!filterUser ? C.green : C.border}`, background: !filterUser ? C.green+"15" : "transparent", color: !filterUser ? C.green : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              All
+            </button>
+            {opponents.map(u => {
+              const isSelected = filterUser === u;
+              return (
+                <button key={u} onClick={() => setFilterUser(isSelected ? null : u)}
+                  style={{ padding: "6px 14px", borderRadius: 20, border: `1px solid ${isSelected ? C.blue : C.border}`, background: isSelected ? C.blue+"15" : "transparent", color: isSelected ? C.blue : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  @{u}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* H2H card */}
       {h2h && (
         <div style={{ background: C.card, border: `1px solid ${C.blue}22`, borderRadius: 14, padding: "14px 16px", marginBottom: 16 }}>
           <div style={{ fontSize: 10, color: C.blue, letterSpacing: 1, marginBottom: 10 }}>HEAD TO HEAD vs @{filterUser}</div>
@@ -450,7 +559,6 @@ function HistoryScreen() {
             {[
               [h2h.wins+"-"+h2h.losses, "Record", h2h.wins > h2h.losses ? C.green : h2h.wins < h2h.losses ? C.red : C.muted],
               [h2h.bets, "Bets", C.text],
-              [(h2h.net >= 0 ? "+" : "") + "$" + h2h.net, "Net", h2h.net > 0 ? C.green : h2h.net < 0 ? C.red : C.muted],
             ].map(([v,l,c]) => (
               <div key={l} style={{ flex: 1, textAlign: "center", background: "#0d0f14", borderRadius: 10, padding: "10px 8px" }}>
                 <div style={{ fontSize: 18, fontWeight: 800, color: c }}>{v}</div>
@@ -461,21 +569,21 @@ function HistoryScreen() {
         </div>
       )}
 
-      {/* Monthly chart — only show when no filter */}
-      {!filterUser && (
+      {/* Monthly chart */}
+      {!filterUser && monthlyData.months.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 16 }}>$ IN PLAY — MONTHLY</div>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 16 }}>$ WAGERED — MONTHLY</div>
           <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 80 }}>
-            {months.map((m,i) => (
+            {monthlyData.months.map((m, i) => (
               <div key={m} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                <div style={{ width: "100%", borderRadius: "4px 4px 0 0", height: `${(amounts[i]/max)*70}px`, background: i===months.length-1 ? `linear-gradient(180deg,${C.green},${C.green}88)` : `linear-gradient(180deg,${C.blue}88,${C.blue}44)` }} />
+                <div style={{ width: "100%", borderRadius: "4px 4px 0 0", height: `${(monthlyData.amounts[i]/max)*70}px`, background: i===monthlyData.months.length-1 ? `linear-gradient(180deg,${C.green},${C.green}88)` : `linear-gradient(180deg,${C.blue}88,${C.blue}44)` }} />
                 <div style={{ fontSize: 8, color: C.muted }}>{m}</div>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
-            {[["$340","This Month",C.green],["18-12","Record",C.blue],["$180","Net +",C.gold]].map(([v,l,c]) => (
-              <div key={l} style={{ flex: 1, textAlign: "center" }}><div style={{ fontSize: 18, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 9, color: C.muted }}>{l}</div></div>
+            {[[settled.length + " bets","Settled",C.blue],[allBets.filter(b=>b.status!=="settled").length+" bets","Active",C.green]].map(([v,l,c]) => (
+              <div key={l} style={{ flex: 1, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 9, color: C.muted }}>{l}</div></div>
             ))}
           </div>
         </div>
@@ -484,11 +592,21 @@ function HistoryScreen() {
       <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>
         {filterUser ? `BETS WITH @${filterUser.toUpperCase()} (${filtered.length})` : `ALL SETTLED BETS (${filtered.length})`}
       </div>
+      {!loading && filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: "30px 20px", color: C.muted, fontSize: 13 }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
+          {filterUser ? `No settled bets with @${filterUser} yet` : "No settled bets yet"}
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {filtered.length === 0
-          ? <div style={{ textAlign: "center", padding: "30px 20px", color: C.muted, fontSize: 13 }}>No settled bets with @{filterUser} yet</div>
-          : filtered.map(bet => <BetCard key={bet.id} bet={bet} />)
-        }
+        {filtered.map(bet => <BetCard key={bet.id} bet={{
+          ...bet,
+          participants: Array(bet.participant_count || 1).fill(""),
+          myPick: bet.my_pick,
+          endTime: bet.end_time,
+          startTime: bet.start_time,
+          isPublic: bet.is_public,
+        }} />)}
       </div>
     </div>
   );
@@ -857,14 +975,38 @@ function ResolveModal({ bet, onClose }) {
 }
 
 export default function FriendlyBets() {
-  const [authScreen, setAuthScreen] = useState("splash"); // splash | login | signup
+  const [authScreen, setAuthScreen] = useState("splash");
   const [currentUser, setCurrentUser] = useState(null);
   const [screen, setScreen] = useState("home");
   const [showCreate, setShowCreate] = useState(false);
   const [resolveBet, setResolveBet] = useState(null);
+  const [booting, setBooting] = useState(true);
+
+  // Auto-login if token exists
+  useEffect(() => {
+    const token = localStorage.getItem("fb_token");
+    if (!token) { setBooting(false); return; }
+    apiFetch("/me").then(user => {
+      setCurrentUser({ ...user, avatarColor: user.avatar_color });
+      setAuthScreen(null);
+      setBooting(false);
+    }).catch(() => {
+      localStorage.removeItem("fb_token");
+      setBooting(false);
+    });
+  }, []);
 
   const handleLogin = (user) => { setCurrentUser(user); setAuthScreen(null); };
-  const handleLogout = () => { setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
+  const handleLogout = () => { localStorage.removeItem("fb_token"); setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
+
+  if (booting) return (
+    <div style={{ maxWidth: 390, margin: "0 auto", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>🤝</div>
+        <div style={{ fontSize: 14, color: "#4a5068" }}>Loading...</div>
+      </div>
+    </div>
+  );
 
   const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["history","◈","History"]];
 
