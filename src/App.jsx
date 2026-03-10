@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://friendlybets-backend-production.up.railway.app/api";
+const ODDS_API_KEY = "4e2140f050f016962ce51ac29daf1f9c";
 
 async function apiFetch(path, opts = {}) {
   const token = localStorage.getItem("fb_token");
@@ -57,7 +58,7 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
   const [update, setUpdate] = useState("");
   const [updates, setUpdates] = useState(bet.updates ? JSON.parse(bet.updates) : []);
   const [postingUpdate, setPostingUpdate] = useState(false);
-  const isCreator = currentUser && (bet.creator_name === currentUser.username || bet.admin_id === currentUser.id);
+  const isCreator = currentUser && (bet.creator_name === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
 
   const formatDate = (t) => {
     if (!t) return "Not set";
@@ -71,9 +72,13 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
     setDeleting(true);
     try {
       await apiFetch(`/bets/${bet.id}`, { method: "DELETE" });
-      onDeleted && onDeleted();
       onClose();
-    } catch { setDeleting(false); }
+      if (onDeleted) { onDeleted(); } else { window.location.reload(); }
+    } catch (e) { 
+      console.error("Delete failed:", e);
+      setDeleting(false); 
+      setConfirmDelete(false);
+    }
   };
 
   const postUpdate = async () => {
@@ -208,13 +213,78 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
 
 function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "" });
   const [inviteSearch, setInviteSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [invitees, setInvitees] = useState([]);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [gameSearch, setGameSearch] = useState("");
+  const [games, setGames] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(false);
+  const [selectedGame, setSelectedGame] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const searchGames = async (query) => {
+    setGameSearch(query);
+    if (query.length < 2) { setGames([]); return; }
+    setLoadingGames(true);
+    try {
+      const sports = ["americanfootball_nfl","basketball_nba","baseball_mlb","icehockey_nhl","basketball_ncaab","americanfootball_ncaaf"];
+      const results = [];
+      for (const sport of sports) {
+        try {
+          const res = await fetch(`https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=spreads,h2h&oddsFormat=american`);
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            data.forEach(game => {
+              const home = game.home_team || "";
+              const away = game.away_team || "";
+              if (home.toLowerCase().includes(query.toLowerCase()) || away.toLowerCase().includes(query.toLowerCase())) {
+                // Extract spread and moneyline
+                let spread_home = "", spread_away = "", ml_home = "", ml_away = "";
+                (game.bookmakers || []).slice(0,1).forEach(book => {
+                  (book.markets || []).forEach(market => {
+                    if (market.key === "spreads") {
+                      market.outcomes.forEach(o => {
+                        if (o.name === home) spread_home = (o.point > 0 ? "+" : "") + o.point;
+                        if (o.name === away) spread_away = (o.point > 0 ? "+" : "") + o.point;
+                      });
+                    }
+                    if (market.key === "h2h") {
+                      market.outcomes.forEach(o => {
+                        if (o.name === home) ml_home = (o.price > 0 ? "+" : "") + o.price;
+                        if (o.name === away) ml_away = (o.price > 0 ? "+" : "") + o.price;
+                      });
+                    }
+                  });
+                });
+                results.push({ id: game.id, sport, home, away, spread_home, spread_away, ml_home, ml_away, commence: game.commence_time });
+              }
+            });
+          }
+        } catch {}
+      }
+      setGames(results.slice(0, 8));
+    } catch {}
+    setLoadingGames(false);
+  };
+
+  const selectGame = (game, type) => {
+    const isSpread = type === "spread";
+    const oddsH = isSpread ? (game.spread_home || game.ml_home) : game.ml_home;
+    const oddsA = isSpread ? (game.spread_away || game.ml_away) : game.ml_away;
+    const title = isSpread
+      ? `${game.away} @ ${game.home} — Spread`
+      : `${game.away} @ ${game.home} — Moneyline`;
+    const desc = isSpread
+      ? `Spread bet: ${game.home} ${game.spread_home || "N/A"} / ${game.away} ${game.spread_away || "N/A"}. Resolves at final score.`
+      : `Moneyline: ${game.home} ${game.ml_home || "N/A"} / ${game.away} ${game.ml_away || "N/A"}. Resolves at final score.`;
+    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA }));
+    setSelectedGame(game);
+    setGames([]);
+    setGameSearch("");
+  };
 
   const searchUsers = async (q) => {
     setInviteSearch(q);
@@ -271,8 +341,63 @@ function CreateModal({ onClose, onCreated }) {
         {step === 2 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Bet Details</div>
+
+            {/* Game search for factual bets */}
+            {form.category === "factual" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>🔍 SEARCH LIVE GAMES (optional)</div>
+                <input placeholder="Search team name e.g. Lakers, Chiefs..." value={gameSearch}
+                  onChange={e => searchGames(e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                {loadingGames && <div style={{ fontSize: 11, color: C.muted, padding: "8px 0" }}>Fetching live odds...</div>}
+                {games.length > 0 && (
+                  <div style={{ background: "#0a0c12", border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+                    {games.map(game => (
+                      <div key={game.id} style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 6 }}>{game.away} @ {game.home}</div>
+                        <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>{new Date(game.commence).toLocaleDateString()} {new Date(game.commence).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {game.spread_home && (
+                            <button onClick={() => selectGame(game, "spread")}
+                              style={{ flex: 1, padding: "6px 8px", borderRadius: 8, border: `1px solid ${C.blue}44`, background: C.blue+"10", color: C.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              📊 Spread {game.spread_home}/{game.spread_away}
+                            </button>
+                          )}
+                          {game.ml_home && (
+                            <button onClick={() => selectGame(game, "ml")}
+                              style={{ flex: 1, padding: "6px 8px", borderRadius: 8, border: `1px solid ${C.purple}44`, background: C.purple+"10", color: C.purple, fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              💰 ML {game.ml_home}/{game.ml_away}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedGame && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, padding: "8px 12px", background: C.green+"10", border: `1px solid ${C.green}30`, borderRadius: 10, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: C.green, flex: 1 }}>✓ {selectedGame.away} @ {selectedGame.home}</span>
+                    <button onClick={() => { setSelectedGame(null); set("title",""); set("description",""); }} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <input placeholder="Bet title" value={form.title} onChange={e => set("title", e.target.value)} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
             <textarea placeholder="Description — terms, rules, how it resolves..." value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
+
+            {/* Show selected odds */}
+            {form.odds_home && (
+              <div style={{ display: "flex", gap: 8 }}>
+                {[[form.home_team, form.odds_home, C.blue],[form.away_team, form.odds_away, C.text]].map(([team,odds,c]) => (
+                  <div key={team} style={{ flex: 1, background: "#0d0f14", border: `1px solid ${C.border}`, borderRadius: 10, padding: "8px 12px", textAlign: "center" }}>
+                    <div style={{ fontSize: 10, color: C.muted, marginBottom: 2 }}>{team}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: c }}>{odds}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 10 }}>
               {["Public","Private"].map(opt => (
                 <button key={opt} onClick={() => set("isPublic", opt==="Public")} style={{ flex: 1, padding: 10, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: (opt==="Public")===form.isPublic ? C.green+"15" : "#0d0f14", border: `1px solid ${(opt==="Public")===form.isPublic ? C.green : C.border}`, color: (opt==="Public")===form.isPublic ? C.green : C.muted }}>
