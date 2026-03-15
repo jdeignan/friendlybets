@@ -58,7 +58,7 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
   const [update, setUpdate] = useState("");
   const [updates, setUpdates] = useState(bet.updates ? JSON.parse(bet.updates) : []);
   const [postingUpdate, setPostingUpdate] = useState(false);
-  const isCreator = currentUser && (bet.creator_name === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
+  const isCreator = currentUser && (bet.creator_name === currentUser.username || bet.my_username === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
 
   const formatDate = (t) => {
     if (!t) return "Not set";
@@ -99,7 +99,7 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>BET DETAILS</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 16 }}>{bet.title}</div>
-        <div style={{ fontSize: 13, color: "#9aa0b8", lineHeight: 1.7, marginBottom: 20 }}>{bet.description}</div>
+        <div style={{ fontSize: 13, color: "#9aa0b8", lineHeight: 1.7, marginBottom: 20 }}>{bet.description || "No description"}</div>
 
         {/* Dates */}
         <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
@@ -188,7 +188,7 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
             </div>
             <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{bet.title}</div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <div style={{ fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{bet.description.slice(0, 60)}...</div>
+              <div style={{ fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{(bet.description||"").slice(0, 60)}{(bet.description||"").length > 60 ? "..." : ""}</div>
               <button onClick={e => { e.stopPropagation(); setShow(true); }} style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: "#1e2330", border: `1px solid ${C.border}`, color: C.blue, fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontFamily: "inherit" }}>i</button>
             </div>
           </div>
@@ -595,16 +595,142 @@ function HomeScreen({ user, onLogout, onResolve }) {
   );
 }
 
+function InviteCard({ inv, onResponded }) {
+  const [pick, setPick] = useState("");
+  const [guess, setGuess] = useState("");
+  const [startValue, setStartValue] = useState("");
+  const [accepting, setAccepting] = useState(false);
+
+  // Determine the opposite side for factual bets
+  const getOpposingSide = () => {
+    if (!inv.odds_home || !inv.creator_pick) return null;
+    const creatorPick = inv.creator_pick;
+    const homeLabel = `${inv.home_team} ${inv.odds_home}`;
+    const awayLabel = `${inv.away_team} ${inv.odds_away}`;
+    if (creatorPick === homeLabel) return awayLabel;
+    if (creatorPick === awayLabel) return homeLabel;
+    return null;
+  };
+
+  const opposingSide = getOpposingSide();
+  const betCat = inv.bet_type || inv.category || "";
+  const isFactual = betCat === "factual";
+  const isGuess = betCat === "guess";
+  const isWeight = betCat === "weight";
+
+  const canAccept = () => {
+    if (isFactual && inv.odds_home && inv.home_team) return !!pick;
+    if (isGuess) return !!guess;
+    if (isWeight) return !!startValue;
+    return true;
+  };
+
+  const handleAccept = async () => {
+    if (!canAccept()) return;
+    setAccepting(true);
+    try {
+      await apiFetch(`/invites/${inv.id}/accept`, { 
+        method: "POST", 
+        body: JSON.stringify({ pick: pick || null, guess: guess || null, startValue: startValue || null }) 
+      });
+      onResponded();
+    } catch { setAccepting(false); }
+  };
+
+  const handleDecline = async () => {
+    try {
+      await apiFetch(`/invites/${inv.id}/decline`, { method: "POST" });
+      onResponded();
+    } catch {}
+  };
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: "16px 18px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from_username}</span> · {inv.participant_count} joined</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div>
+          <div style={{ fontSize: 9, color: C.muted }}>WAGER</div>
+        </div>
+      </div>
+
+      {inv.end_time && <div style={{ fontSize: 10, color: C.gold, marginBottom: 10 }}>Ends {new Date(inv.end_time).toLocaleDateString()}</div>}
+
+      {/* FACTUAL — pick your side */}
+      {isFactual && inv.odds_home && (
+        <div style={{ marginBottom: 12 }}>
+          {inv.creator_pick && (
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+              @{inv.from_username} took <span style={{ color: C.blue, fontWeight: 700 }}>{inv.creator_pick}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>PICK YOUR SIDE TO ACCEPT</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[[inv.home_team, inv.odds_home, C.blue],[inv.away_team, inv.odds_away, C.purple]].map(([team, odds, c]) => {
+              const label = `${team} ${odds}`;
+              const isSelected = pick === label;
+              const takenByCreator = inv.creator_pick === label;
+              return (
+                <button key={team} onClick={() => !takenByCreator && setPick(isSelected ? "" : label)}
+                  style={{ flex: 1, background: isSelected ? c+"20" : takenByCreator ? "#0d0f14" : "#0d0f14", border: `2px solid ${isSelected ? c : takenByCreator ? C.red+"44" : C.border}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: takenByCreator ? "default" : "pointer", fontFamily: "inherit" }}>
+                  <div style={{ fontSize: 10, color: isSelected ? c : takenByCreator ? C.red : C.muted, marginBottom: 4 }}>{team}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: isSelected ? c : C.text }}>{odds}</div>
+                  {takenByCreator && <div style={{ fontSize: 9, color: C.red, marginTop: 2 }}>TAKEN</div>}
+                  {isSelected && <div style={{ fontSize: 9, color: c, marginTop: 2 }}>✓ MY PICK</div>}
+                </button>
+              );
+            })}
+          </div>
+          {opposingSide && !pick && (
+            <div style={{ fontSize: 10, color: C.gold, marginTop: 6 }}>
+              You'll get: <span style={{ fontWeight: 700 }}>{opposingSide}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* GUESS — enter your number */}
+      {isGuess && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>ENTER YOUR GUESS TO ACCEPT</div>
+          <input type="number" placeholder="Your guess..." value={guess} onChange={e => setGuess(e.target.value)}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess wins the pot</div>
+        </div>
+      )}
+
+      {/* WEIGHT — enter starting weight */}
+      {isWeight && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR STARTING WEIGHT TO ACCEPT</div>
+          <input type="number" placeholder="e.g. 185" value={startValue} onChange={e => setStartValue(e.target.value)}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Most weight lost (%) by end date wins</div>
+        </div>
+      )}
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={handleAccept} disabled={!canAccept() || accepting}
+          style={{ flex: 1, padding: 10, borderRadius: 10, background: canAccept() ? C.green+"15" : "#1e2330", border: `1px solid ${canAccept() ? C.green+"30" : C.border}`, color: canAccept() ? C.green : C.muted, fontWeight: 700, fontSize: 12, cursor: canAccept() ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+          {accepting ? "..." : "✓ Accept"}
+        </button>
+        <button onClick={handleDecline}
+          style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+          ✕ Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InvitesScreen() {
   const { data: invites, loading, reload } = useApi("/invites");
   const list = invites || [];
-
-  const respond = async (id, action) => {
-    try {
-      await apiFetch(`/invites/${id}/${action}`, { method: "POST" });
-      reload();
-    } catch {}
-  };
 
   return (
     <div style={{ padding: "20px 16px" }}>
@@ -618,22 +744,7 @@ function InvitesScreen() {
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {list.map(inv => (
-          <div key={inv.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: "16px 18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from_username}</span> · {inv.participant_count} joined</div>
-              </div>
-              <div style={{ textAlign: "right" }}><div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div><div style={{ fontSize: 9, color: C.muted }}>WAGER</div></div>
-            </div>
-            {inv.end_time && <div style={{ fontSize: 10, color: C.gold, marginBottom: 12 }}>Ends {new Date(inv.end_time).toLocaleDateString()}</div>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => respond(inv.id, "accept")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Accept</button>
-              <button onClick={() => respond(inv.id, "decline")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕ Decline</button>
-            </div>
-          </div>
-        ))}
+        {list.map(inv => <InviteCard key={inv.id} inv={inv} onResponded={reload} />)}
       </div>
     </div>
   );
