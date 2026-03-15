@@ -56,7 +56,12 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [update, setUpdate] = useState("");
-  const [updates, setUpdates] = useState(bet.updates ? JSON.parse(bet.updates) : []);
+  const parseUpdates = (u) => {
+    if (!u) return [];
+    if (Array.isArray(u)) return u;
+    try { return JSON.parse(u); } catch { return []; }
+  };
+  const [updates, setUpdates] = useState(parseUpdates(bet.updates));
   const [postingUpdate, setPostingUpdate] = useState(false);
   const isCreator = currentUser && (bet.creator_name === currentUser.username || bet.my_username === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
 
@@ -121,8 +126,53 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
           </div>
         </div>
 
+        {/* Guesses for guess bets */}
+        {(bet.category === "guess" || bet.bet_type === "guess") && bet.guesses_list && bet.guesses_list.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>🫙 ALL GUESSES</div>
+            {bet.guesses_list.map((g, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0d0f14", borderRadius: 10, padding: "10px 14px", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.text }}>@{g.username}</span>
+                <span style={{ fontSize: 16, fontWeight: 800, color: C.blue }}>{g.guess}</span>
+              </div>
+            ))}
+            {bet.guess_answer && (
+              <div style={{ padding: "10px 14px", background: C.green+"10", border: `1px solid ${C.green}30`, borderRadius: 10, marginTop: 8 }}>
+                <div style={{ fontSize: 10, color: C.green, marginBottom: 2 }}>ANSWER</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: C.green }}>{bet.guess_answer}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Weight picks */}
+        {(bet.category === "weight" || bet.bet_type === "weight") && bet.guesses_list && bet.guesses_list.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>⚖️ STARTING WEIGHTS</div>
+            {bet.guesses_list.map((g, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0d0f14", borderRadius: 10, padding: "10px 14px", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.text }}>@{g.username}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: C.gold }}>{g.start_value} lbs</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Factual picks */}
+        {bet.category === "factual" && bet.guesses_list && bet.guesses_list.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>🏈 PICKS</div>
+            {bet.guesses_list.map((g, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0d0f14", borderRadius: 10, padding: "10px 14px", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: C.text }}>@{g.username}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: C.blue }}>{g.pick || "No pick"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Progress updates for admin bets */}
-        {bet.category === "admin" && (
+        {(bet.category === "admin" || bet.bet_type === "admin") && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>📊 PROGRESS UPDATES</div>
             {updates.length === 0 && <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>No updates yet</div>}
@@ -147,13 +197,13 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
 
         {/* Action buttons */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {bet.category === "admin" && bet.status !== "settled" && isCreator && (
+          {(bet.category === "admin" || bet.bet_type === "admin") && bet.status !== "settled" && isCreator && (
             <button onClick={() => { onClose(); onResolve && onResolve(bet); }}
               style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
               🏆 Settle
             </button>
           )}
-          {isCreator && bet.status !== "settled" && (
+          {isCreator && (
             <button onClick={handleDelete} disabled={deleting}
               style={{ flex: 1, padding: 12, borderRadius: 12, background: confirmDelete ? C.red+"25" : C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
               {deleting ? "Deleting..." : confirmDelete ? "Confirm Delete" : "🗑 Delete"}
