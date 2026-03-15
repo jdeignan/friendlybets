@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 
 const API = "https://friendlybets-backend-production.up.railway.app/api";
+const ODDS_API_KEY = "4e2140f050f016962ce51ac29daf1f9c";
 
 async function apiFetch(path, opts = {}) {
   const token = localStorage.getItem("fb_token");
@@ -212,13 +213,78 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
 
 function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "", bet_type: "", my_guess: "", my_start_value: "" });
   const [inviteSearch, setInviteSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [invitees, setInvitees] = useState([]);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
+  const [gameSearch, setGameSearch] = useState("");
+  const [games, setGames] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(false);
+  const [selectedGame, setSelectedGame] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const searchGames = async (query) => {
+    setGameSearch(query);
+    if (query.length < 2) { setGames([]); return; }
+    setLoadingGames(true);
+    try {
+      const sports = ["americanfootball_nfl","basketball_nba","baseball_mlb","icehockey_nhl","basketball_ncaab","americanfootball_ncaaf"];
+      const results = [];
+      for (const sport of sports) {
+        try {
+          const res = await fetch(`https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=spreads,h2h&oddsFormat=american`);
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            data.forEach(game => {
+              const home = game.home_team || "";
+              const away = game.away_team || "";
+              if (home.toLowerCase().includes(query.toLowerCase()) || away.toLowerCase().includes(query.toLowerCase())) {
+                // Extract spread and moneyline
+                let spread_home = "", spread_away = "", ml_home = "", ml_away = "";
+                (game.bookmakers || []).slice(0,1).forEach(book => {
+                  (book.markets || []).forEach(market => {
+                    if (market.key === "spreads") {
+                      market.outcomes.forEach(o => {
+                        if (o.name === home) spread_home = (o.point > 0 ? "+" : "") + o.point;
+                        if (o.name === away) spread_away = (o.point > 0 ? "+" : "") + o.point;
+                      });
+                    }
+                    if (market.key === "h2h") {
+                      market.outcomes.forEach(o => {
+                        if (o.name === home) ml_home = (o.price > 0 ? "+" : "") + o.price;
+                        if (o.name === away) ml_away = (o.price > 0 ? "+" : "") + o.price;
+                      });
+                    }
+                  });
+                });
+                results.push({ id: game.id, sport, home, away, spread_home, spread_away, ml_home, ml_away, commence: game.commence_time });
+              }
+            });
+          }
+        } catch {}
+      }
+      setGames(results.slice(0, 8));
+    } catch {}
+    setLoadingGames(false);
+  };
+
+  const selectGame = (game, type) => {
+    const isSpread = type === "spread";
+    const oddsH = isSpread ? (game.spread_home || game.ml_home) : game.ml_home;
+    const oddsA = isSpread ? (game.spread_away || game.ml_away) : game.ml_away;
+    const title = isSpread
+      ? `${game.away} @ ${game.home} — Spread`
+      : `${game.away} @ ${game.home} — Moneyline`;
+    const desc = isSpread
+      ? `Spread bet: ${game.home} ${game.spread_home || "N/A"} / ${game.away} ${game.spread_away || "N/A"}. Resolves at final score.`
+      : `Moneyline: ${game.home} ${game.ml_home || "N/A"} / ${game.away} ${game.ml_away || "N/A"}. Resolves at final score.`;
+    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA }));
+    setSelectedGame(game);
+    setGames([]);
+    setGameSearch("");
+  };
 
   const searchUsers = async (q) => {
     setInviteSearch(q);
@@ -236,13 +302,31 @@ function CreateModal({ onClose, onCreated }) {
     if (!form.amount) return;
     setSaving(true);
     try {
-      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({ title: form.title, description: form.description, category: form.category, amount: Number(form.amount), endTime: form.endDate || null, isPublic: form.isPublic }) });
+      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        amount: Number(form.amount),
+        endTime: form.endDate || null,
+        isPublic: form.isPublic,
+        myPick: form.my_pick || null,
+        oddsHome: form.odds_home || null,
+        oddsAway: form.odds_away || null,
+        homeTeam: form.home_team || null,
+        awayTeam: form.away_team || null,
+        betType: form.bet_type || null,
+        myGuess: form.my_guess || null,
+        myStartValue: form.my_start_value || null,
+      }) });
       if (invitees.length > 0) {
         await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
       }
       setDone(true);
       setTimeout(() => { onCreated && onCreated(); onClose(); }, 1200);
-    } catch { setSaving(false); }
+    } catch(e) { 
+      console.error("Create failed:", e);
+      setSaving(false); 
+    }
   };
 
   if (done) return (
@@ -263,8 +347,13 @@ function CreateModal({ onClose, onCreated }) {
         {step === 1 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>What kind of bet?</div>
-            {[["factual","⚡","Factual Result","Sports game, election — outcome is automatic"],["admin","👑","Admin Decides","Weight loss, golf, custom — you pick the winner"]].map(([k,icon,label,desc]) => (
-              <div key={k} onClick={() => { set("category", k); setStep(2); }} style={{ padding: "16px 18px", borderRadius: 14, cursor: "pointer", background: form.category===k ? C.green+"10" : "#0d0f14", border: `1.5px solid ${form.category===k ? C.green : C.border}` }}>
+            {[
+              ["factual","⚡","Sports / Factual","Game spread, moneyline — outcome is automatic"],
+              ["guess","🫙","Closest Guess Wins","Jelly beans, price is right, any number guess"],
+              ["weight","⚖️","Weight Loss Challenge","Track % or lbs lost — winner auto-calculated"],
+              ["admin","👑","Admin Decides","Golf, custom challenges — you pick the winner"],
+            ].map(([k,icon,label,desc]) => (
+              <div key={k} onClick={() => { set("category", k); set("bet_type", k); setStep(2); }} style={{ padding: "16px 18px", borderRadius: 14, cursor: "pointer", background: form.category===k ? C.green+"10" : "#0d0f14", border: `1.5px solid ${form.category===k ? C.green : C.border}` }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 4 }}>{icon} {label}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>{desc}</div>
               </div>
@@ -275,8 +364,73 @@ function CreateModal({ onClose, onCreated }) {
         {step === 2 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Bet Details</div>
+
+            {/* Game search for factual bets */}
+            {form.category === "factual" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>🔍 SEARCH LIVE GAMES (optional)</div>
+                <input placeholder="Search team name e.g. Lakers, Chiefs..." value={gameSearch}
+                  onChange={e => searchGames(e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                {loadingGames && <div style={{ fontSize: 11, color: C.muted, padding: "8px 0" }}>Fetching live odds...</div>}
+                {games.length > 0 && (
+                  <div style={{ background: "#0a0c12", border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+                    {games.map(game => (
+                      <div key={game.id} style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 6 }}>{game.away} @ {game.home}</div>
+                        <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>{new Date(game.commence).toLocaleDateString()} {new Date(game.commence).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})}</div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          {game.spread_home && (
+                            <button onClick={() => selectGame(game, "spread")}
+                              style={{ flex: 1, padding: "6px 8px", borderRadius: 8, border: `1px solid ${C.blue}44`, background: C.blue+"10", color: C.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              📊 Spread {game.spread_home}/{game.spread_away}
+                            </button>
+                          )}
+                          {game.ml_home && (
+                            <button onClick={() => selectGame(game, "ml")}
+                              style={{ flex: 1, padding: "6px 8px", borderRadius: 8, border: `1px solid ${C.purple}44`, background: C.purple+"10", color: C.purple, fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                              💰 ML {game.ml_home}/{game.ml_away}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedGame && (
+                  <div style={{ display: "flex", gap: 6, marginTop: 4, padding: "8px 12px", background: C.green+"10", border: `1px solid ${C.green}30`, borderRadius: 10, alignItems: "center" }}>
+                    <span style={{ fontSize: 11, color: C.green, flex: 1 }}>✓ {selectedGame.away} @ {selectedGame.home}</span>
+                    <button onClick={() => { setSelectedGame(null); set("title",""); set("description",""); }} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <input placeholder="Bet title" value={form.title} onChange={e => set("title", e.target.value)} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none" }} />
             <textarea placeholder="Description — terms, rules, how it resolves..." value={form.description} onChange={e => set("description", e.target.value)} rows={3} style={{ padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", resize: "none" }} />
+
+            {/* Show selected odds + pick your side */}
+            {form.odds_home && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>PICK YOUR SIDE</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[[form.home_team, form.odds_home, C.blue],[form.away_team, form.odds_away, C.purple]].map(([team,odds,c]) => {
+                    const pickLabel = `${team} ${odds}`;
+                    const isSelected = form.my_pick === pickLabel;
+                    return (
+                      <button key={team} onClick={() => set("my_pick", isSelected ? "" : pickLabel)}
+                        style={{ flex: 1, background: isSelected ? c+"20" : "#0d0f14", border: `2px solid ${isSelected ? c : C.border}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>
+                        <div style={{ fontSize: 10, color: isSelected ? c : C.muted, marginBottom: 4 }}>{team}</div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: isSelected ? c : C.text }}>{odds}</div>
+                        {isSelected && <div style={{ fontSize: 9, color: c, marginTop: 4 }}>✓ MY PICK</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!form.my_pick && <div style={{ fontSize: 10, color: C.gold, marginTop: 6 }}>Tap a side to lock in your pick</div>}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 10 }}>
               {["Public","Private"].map(opt => (
                 <button key={opt} onClick={() => set("isPublic", opt==="Public")} style={{ flex: 1, padding: 10, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: (opt==="Public")===form.isPublic ? C.green+"15" : "#0d0f14", border: `1px solid ${(opt==="Public")===form.isPublic ? C.green : C.border}`, color: (opt==="Public")===form.isPublic ? C.green : C.muted }}>
@@ -290,16 +444,52 @@ function CreateModal({ onClose, onCreated }) {
 
         {step === 3 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager, Timing & Invite</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager & Invite</div>
+
+            {/* Wager */}
             <div>
               <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>WAGER PER PERSON ($)</div>
               <input type="number" placeholder="25" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
             </div>
-            <div>
-              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
-              <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
-              <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
-            </div>
+
+            {/* End date — only for admin/weight/guess bets, not factual */}
+            {form.category !== "factual" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
+                <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
+              </div>
+            )}
+
+            {/* Guess bet — enter your guess */}
+            {form.category === "guess" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR GUESS</div>
+                <input type="number" placeholder="e.g. 847" value={form.my_guess} onChange={e => set("my_guess", e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess to the real answer wins</div>
+              </div>
+            )}
+
+            {/* Weight loss — starting weight */}
+            {form.category === "weight" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR STARTING WEIGHT</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="number" placeholder="e.g. 185" value={form.my_start_value} onChange={e => set("my_start_value", e.target.value)}
+                    style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none" }} />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {["lbs", "%"].map(unit => (
+                      <button key={unit} onClick={() => set("weight_unit", unit)}
+                        style={{ padding: "0 14px", borderRadius: 10, border: `1px solid ${form.weight_unit===unit ? C.gold : C.border}`, background: form.weight_unit===unit ? C.gold+"15" : "#0d0f14", color: form.weight_unit===unit ? C.gold : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Winner = most {form.weight_unit === "%" ? "% body weight lost" : "lbs lost"} by end date</div>
+              </div>
+            )}
 
             {/* Invite by username */}
             <div>
@@ -405,16 +595,141 @@ function HomeScreen({ user, onLogout, onResolve }) {
   );
 }
 
+function InviteCard({ inv, onResponded }) {
+  const [pick, setPick] = useState("");
+  const [guess, setGuess] = useState("");
+  const [startValue, setStartValue] = useState("");
+  const [accepting, setAccepting] = useState(false);
+
+  // Determine the opposite side for factual bets
+  const getOpposingSide = () => {
+    if (!inv.odds_home || !inv.creator_pick) return null;
+    const creatorPick = inv.creator_pick;
+    const homeLabel = `${inv.home_team} ${inv.odds_home}`;
+    const awayLabel = `${inv.away_team} ${inv.odds_away}`;
+    if (creatorPick === homeLabel) return awayLabel;
+    if (creatorPick === awayLabel) return homeLabel;
+    return null;
+  };
+
+  const opposingSide = getOpposingSide();
+  const isFactual = inv.category === "factual";
+  const isGuess = inv.category === "guess";
+  const isWeight = inv.category === "weight";
+
+  const canAccept = () => {
+    if (isFactual && inv.odds_home) return !!pick;
+    if (isGuess) return !!guess;
+    if (isWeight) return !!startValue;
+    return true;
+  };
+
+  const handleAccept = async () => {
+    if (!canAccept()) return;
+    setAccepting(true);
+    try {
+      await apiFetch(`/invites/${inv.id}/accept`, { 
+        method: "POST", 
+        body: JSON.stringify({ pick: pick || null, guess: guess || null, startValue: startValue || null }) 
+      });
+      onResponded();
+    } catch { setAccepting(false); }
+  };
+
+  const handleDecline = async () => {
+    try {
+      await apiFetch(`/invites/${inv.id}/decline`, { method: "POST" });
+      onResponded();
+    } catch {}
+  };
+
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: "16px 18px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div>
+          <div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from_username}</span> · {inv.participant_count} joined</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div>
+          <div style={{ fontSize: 9, color: C.muted }}>WAGER</div>
+        </div>
+      </div>
+
+      {inv.end_time && <div style={{ fontSize: 10, color: C.gold, marginBottom: 10 }}>Ends {new Date(inv.end_time).toLocaleDateString()}</div>}
+
+      {/* FACTUAL — pick your side */}
+      {isFactual && inv.odds_home && (
+        <div style={{ marginBottom: 12 }}>
+          {inv.creator_pick && (
+            <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+              @{inv.from_username} took <span style={{ color: C.blue, fontWeight: 700 }}>{inv.creator_pick}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>PICK YOUR SIDE TO ACCEPT</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[[inv.home_team, inv.odds_home, C.blue],[inv.away_team, inv.odds_away, C.purple]].map(([team, odds, c]) => {
+              const label = `${team} ${odds}`;
+              const isSelected = pick === label;
+              const takenByCreator = inv.creator_pick === label;
+              return (
+                <button key={team} onClick={() => !takenByCreator && setPick(isSelected ? "" : label)}
+                  style={{ flex: 1, background: isSelected ? c+"20" : takenByCreator ? "#0d0f14" : "#0d0f14", border: `2px solid ${isSelected ? c : takenByCreator ? C.red+"44" : C.border}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: takenByCreator ? "default" : "pointer", fontFamily: "inherit" }}>
+                  <div style={{ fontSize: 10, color: isSelected ? c : takenByCreator ? C.red : C.muted, marginBottom: 4 }}>{team}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: isSelected ? c : C.text }}>{odds}</div>
+                  {takenByCreator && <div style={{ fontSize: 9, color: C.red, marginTop: 2 }}>TAKEN</div>}
+                  {isSelected && <div style={{ fontSize: 9, color: c, marginTop: 2 }}>✓ MY PICK</div>}
+                </button>
+              );
+            })}
+          </div>
+          {opposingSide && !pick && (
+            <div style={{ fontSize: 10, color: C.gold, marginTop: 6 }}>
+              You'll get: <span style={{ fontWeight: 700 }}>{opposingSide}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* GUESS — enter your number */}
+      {isGuess && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>ENTER YOUR GUESS TO ACCEPT</div>
+          <input type="number" placeholder="Your guess..." value={guess} onChange={e => setGuess(e.target.value)}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess wins the pot</div>
+        </div>
+      )}
+
+      {/* WEIGHT — enter starting weight */}
+      {isWeight && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR STARTING WEIGHT TO ACCEPT</div>
+          <input type="number" placeholder="e.g. 185" value={startValue} onChange={e => setStartValue(e.target.value)}
+            style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Most weight lost (%) by end date wins</div>
+        </div>
+      )}
+
+      {/* Buttons */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={handleAccept} disabled={!canAccept() || accepting}
+          style={{ flex: 1, padding: 10, borderRadius: 10, background: canAccept() ? C.green+"15" : "#1e2330", border: `1px solid ${canAccept() ? C.green+"30" : C.border}`, color: canAccept() ? C.green : C.muted, fontWeight: 700, fontSize: 12, cursor: canAccept() ? "pointer" : "not-allowed", fontFamily: "inherit" }}>
+          {accepting ? "..." : "✓ Accept"}
+        </button>
+        <button onClick={handleDecline}
+          style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+          ✕ Decline
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function InvitesScreen() {
   const { data: invites, loading, reload } = useApi("/invites");
   const list = invites || [];
-
-  const respond = async (id, action) => {
-    try {
-      await apiFetch(`/invites/${id}/${action}`, { method: "POST" });
-      reload();
-    } catch {}
-  };
 
   return (
     <div style={{ padding: "20px 16px" }}>
@@ -428,22 +743,7 @@ function InvitesScreen() {
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {list.map(inv => (
-          <div key={inv.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: "16px 18px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10 }}>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>{inv.title}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>from <span style={{ color: C.blue }}>@{inv.from_username}</span> · {inv.participant_count} joined</div>
-              </div>
-              <div style={{ textAlign: "right" }}><div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div><div style={{ fontSize: 9, color: C.muted }}>WAGER</div></div>
-            </div>
-            {inv.end_time && <div style={{ fontSize: 10, color: C.gold, marginBottom: 12 }}>Ends {new Date(inv.end_time).toLocaleDateString()}</div>}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => respond(inv.id, "accept")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.green+"15", border: `1px solid ${C.green}30`, color: C.green, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Accept</button>
-              <button onClick={() => respond(inv.id, "decline")} style={{ flex: 1, padding: 10, borderRadius: 10, background: C.red+"10", border: `1px solid ${C.red}30`, color: C.red, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✕ Decline</button>
-            </div>
-          </div>
-        ))}
+        {list.map(inv => <InviteCard key={inv.id} inv={inv} onResponded={reload} />)}
       </div>
     </div>
   );
