@@ -213,7 +213,7 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
 
 function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "", bet_type: "", my_guess: "", my_start_value: "" });
   const [inviteSearch, setInviteSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [invitees, setInvitees] = useState([]);
@@ -302,13 +302,31 @@ function CreateModal({ onClose, onCreated }) {
     if (!form.amount) return;
     setSaving(true);
     try {
-      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({ title: form.title, description: form.description, category: form.category, amount: Number(form.amount), endTime: form.endDate || null, isPublic: form.isPublic, myPick: form.my_pick || null, oddsHome: form.odds_home || null, oddsAway: form.odds_away || null, homeTeam: form.home_team || null, awayTeam: form.away_team || null }) });
+      const bet = await apiFetch("/bets", { method: "POST", body: JSON.stringify({
+        title: form.title,
+        description: form.description,
+        category: form.category,
+        amount: Number(form.amount),
+        endTime: form.endDate || null,
+        isPublic: form.isPublic,
+        myPick: form.my_pick || null,
+        oddsHome: form.odds_home || null,
+        oddsAway: form.odds_away || null,
+        homeTeam: form.home_team || null,
+        awayTeam: form.away_team || null,
+        betType: form.bet_type || null,
+        myGuess: form.my_guess || null,
+        myStartValue: form.my_start_value || null,
+      }) });
       if (invitees.length > 0) {
         await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
       }
       setDone(true);
       setTimeout(() => { onCreated && onCreated(); onClose(); }, 1200);
-    } catch { setSaving(false); }
+    } catch(e) { 
+      console.error("Create failed:", e);
+      setSaving(false); 
+    }
   };
 
   if (done) return (
@@ -329,8 +347,13 @@ function CreateModal({ onClose, onCreated }) {
         {step === 1 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>What kind of bet?</div>
-            {[["factual","⚡","Factual Result","Sports game, election — outcome is automatic"],["admin","👑","Admin Decides","Weight loss, golf, custom — you pick the winner"]].map(([k,icon,label,desc]) => (
-              <div key={k} onClick={() => { set("category", k); setStep(2); }} style={{ padding: "16px 18px", borderRadius: 14, cursor: "pointer", background: form.category===k ? C.green+"10" : "#0d0f14", border: `1.5px solid ${form.category===k ? C.green : C.border}` }}>
+            {[
+              ["factual","⚡","Sports / Factual","Game spread, moneyline — outcome is automatic"],
+              ["guess","🫙","Closest Guess Wins","Jelly beans, price is right, any number guess"],
+              ["weight","⚖️","Weight Loss Challenge","Track % or lbs lost — winner auto-calculated"],
+              ["admin","👑","Admin Decides","Golf, custom challenges — you pick the winner"],
+            ].map(([k,icon,label,desc]) => (
+              <div key={k} onClick={() => { set("category", k); set("bet_type", k); setStep(2); }} style={{ padding: "16px 18px", borderRadius: 14, cursor: "pointer", background: form.category===k ? C.green+"10" : "#0d0f14", border: `1.5px solid ${form.category===k ? C.green : C.border}` }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 4 }}>{icon} {label}</div>
                 <div style={{ fontSize: 11, color: C.muted }}>{desc}</div>
               </div>
@@ -421,16 +444,52 @@ function CreateModal({ onClose, onCreated }) {
 
         {step === 3 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager, Timing & Invite</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Wager & Invite</div>
+
+            {/* Wager */}
             <div>
               <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>WAGER PER PERSON ($)</div>
               <input type="number" placeholder="25" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
             </div>
-            <div>
-              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
-              <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
-              <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
-            </div>
+
+            {/* End date — only for admin/weight/guess bets, not factual */}
+            {form.category !== "factual" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>END DATE & TIME</div>
+                <input type="datetime-local" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", colorScheme: "dark" }} />
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Leave blank if no end date</div>
+              </div>
+            )}
+
+            {/* Guess bet — enter your guess */}
+            {form.category === "guess" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR GUESS</div>
+                <input type="number" placeholder="e.g. 847" value={form.my_guess} onChange={e => set("my_guess", e.target.value)}
+                  style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess to the real answer wins</div>
+              </div>
+            )}
+
+            {/* Weight loss — starting weight */}
+            {form.category === "weight" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR STARTING WEIGHT</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="number" placeholder="e.g. 185" value={form.my_start_value} onChange={e => set("my_start_value", e.target.value)}
+                    style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none" }} />
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {["lbs", "%"].map(unit => (
+                      <button key={unit} onClick={() => set("weight_unit", unit)}
+                        style={{ padding: "0 14px", borderRadius: 10, border: `1px solid ${form.weight_unit===unit ? C.gold : C.border}`, background: form.weight_unit===unit ? C.gold+"15" : "#0d0f14", color: form.weight_unit===unit ? C.gold : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                        {unit}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Winner = most {form.weight_unit === "%" ? "% body weight lost" : "lbs lost"} by end date</div>
+              </div>
+            )}
 
             {/* Invite by username */}
             <div>
