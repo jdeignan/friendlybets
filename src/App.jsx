@@ -330,7 +330,7 @@ function CreateModal({ onClose, onCreated }) {
     const desc = isSpread
       ? `Spread bet: ${game.home} ${game.spread_home || "N/A"} / ${game.away} ${game.spread_away || "N/A"}. Resolves at final score.`
       : `Moneyline: ${game.home} ${game.ml_home || "N/A"} / ${game.away} ${game.ml_away || "N/A"}. Resolves at final score.`;
-    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA }));
+    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA, sport_key: game.sport }));
     setSelectedGame(game);
     setGames([]);
     setGameSearch("");
@@ -365,6 +365,7 @@ function CreateModal({ onClose, onCreated }) {
         homeTeam: form.home_team || null,
         awayTeam: form.away_team || null,
         betType: form.bet_type || null,
+        sportKey: form.sport_key || null,
         myGuess: form.my_guess || null,
         myStartValue: form.my_start_value || null,
       }) });
@@ -634,7 +635,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {shown.map(bet => <BetCard key={bet.id} bet={{
           ...bet,
-          participants: Array(bet.participant_count || 1).fill(""),
+          participants: bet.participants_list || [],
           myPick: bet.my_pick,
           endTime: bet.end_time,
           startTime: bet.start_time,
@@ -818,7 +819,7 @@ function LiveScreen() {
         {live.map(bet => (
           <BetCard key={bet.id} bet={{
             ...bet,
-            participants: Array(bet.participant_count || 1).fill(""),
+            participants: bet.participants_list || [],
             myPick: bet.my_pick,
             endTime: bet.end_time,
             startTime: bet.start_time,
@@ -952,7 +953,7 @@ function HistoryScreen() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {filtered.map(bet => <BetCard key={bet.id} bet={{
           ...bet,
-          participants: Array(bet.participant_count || 1).fill(""),
+          participants: bet.participants_list || [],
           myPick: bet.my_pick,
           endTime: bet.end_time,
           startTime: bet.start_time,
@@ -1216,11 +1217,21 @@ function ResolveModal({ bet, onClose }) {
   const customTotal = Object.values(customAmounts).reduce((s, v) => s + Number(v), 0);
   const customValid = customTotal === pot;
 
-  const handleResolve = () => {
+  const handleResolve = async () => {
     if (mode === "equal" && winners.length === 0) return;
     if (mode === "custom" && !customValid) return;
-    setDone(true);
-    setTimeout(onClose, 1800);
+    try {
+      await apiFetch(`/bets/${bet.id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({
+          result: note || (winners.length > 0 ? `${winners.join(", ")} wins` : "Settled"),
+          winnerUsernames: mode === "equal" ? winners : [],
+          customAmounts: mode === "custom" ? customAmounts : null,
+        })
+      });
+      setDone(true);
+      setTimeout(onClose, 1800);
+    } catch(e) { console.error("Resolve failed:", e); }
   };
 
   if (done) return (
