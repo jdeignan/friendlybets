@@ -330,7 +330,7 @@ function CreateModal({ onClose, onCreated }) {
     const desc = isSpread
       ? `Spread bet: ${game.home} ${game.spread_home || "N/A"} / ${game.away} ${game.spread_away || "N/A"}. Resolves at final score.`
       : `Moneyline: ${game.home} ${game.ml_home || "N/A"} / ${game.away} ${game.ml_away || "N/A"}. Resolves at final score.`;
-    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA, sport_key: game.sport }));
+    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA }));
     setSelectedGame(game);
     setGames([]);
     setGameSearch("");
@@ -365,7 +365,6 @@ function CreateModal({ onClose, onCreated }) {
         homeTeam: form.home_team || null,
         awayTeam: form.away_team || null,
         betType: form.bet_type || null,
-        sportKey: form.sport_key || null,
         myGuess: form.my_guess || null,
         myStartValue: form.my_start_value || null,
       }) });
@@ -635,7 +634,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {shown.map(bet => <BetCard key={bet.id} bet={{
           ...bet,
-          participants: bet.participants_list || [],
+          participants: Array(bet.participant_count || 1).fill(""),
           myPick: bet.my_pick,
           endTime: bet.end_time,
           startTime: bet.start_time,
@@ -794,7 +793,7 @@ function InvitesScreen() {
           <div style={{ fontSize: 14, fontWeight: 600 }}>No pending invites</div>
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
         {list.map(inv => <InviteCard key={inv.id} inv={inv} onResponded={reload} />)}
       </div>
     </div>
@@ -819,7 +818,7 @@ function LiveScreen() {
         {live.map(bet => (
           <BetCard key={bet.id} bet={{
             ...bet,
-            participants: bet.participants_list || [],
+            participants: Array(bet.participant_count || 1).fill(""),
             myPick: bet.my_pick,
             endTime: bet.end_time,
             startTime: bet.start_time,
@@ -950,10 +949,10 @@ function HistoryScreen() {
           {filterUser ? `No settled bets with @${filterUser} yet` : "No settled bets yet"}
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
         {filtered.map(bet => <BetCard key={bet.id} bet={{
           ...bet,
-          participants: bet.participants_list || [],
+          participants: Array(bet.participant_count || 1).fill(""),
           myPick: bet.my_pick,
           endTime: bet.end_time,
           startTime: bet.start_time,
@@ -1018,7 +1017,7 @@ function SplashScreen({ onLogin, onSignup }) {
       </div>
 
       {/* CTA buttons */}
-      <div style={{ width: "100%", maxWidth: 320, display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 12 }}>
         <button onClick={onSignup} style={{ width: "100%", padding: "15px", borderRadius: 14, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${C.green},#00b050)`, color: "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit", boxShadow: `0 6px 24px ${C.green}30` }}>
           Create Account
         </button>
@@ -1217,21 +1216,11 @@ function ResolveModal({ bet, onClose }) {
   const customTotal = Object.values(customAmounts).reduce((s, v) => s + Number(v), 0);
   const customValid = customTotal === pot;
 
-  const handleResolve = async () => {
+  const handleResolve = () => {
     if (mode === "equal" && winners.length === 0) return;
     if (mode === "custom" && !customValid) return;
-    try {
-      await apiFetch(`/bets/${bet.id}/resolve`, {
-        method: "POST",
-        body: JSON.stringify({
-          result: note || (winners.length > 0 ? `${winners.join(", ")} wins` : "Settled"),
-          winnerUsernames: mode === "equal" ? winners : [],
-          customAmounts: mode === "custom" ? customAmounts : null,
-        })
-      });
-      setDone(true);
-      setTimeout(onClose, 1800);
-    } catch(e) { console.error("Resolve failed:", e); }
+    setDone(true);
+    setTimeout(onClose, 1800);
   };
 
   if (done) return (
@@ -1246,7 +1235,7 @@ function ResolveModal({ bet, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 2000 }} onClick={onClose}>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "24px 24px 0 0", padding: 24, width: "100%", maxWidth: 390, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 40, height: 4, borderRadius: 2, background: C.border, margin: "0 auto 20px" }} />
         <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>RESOLVE BET</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 4 }}>{bet.title}</div>
@@ -1362,7 +1351,7 @@ export default function FriendlyBets() {
   const handleLogout = () => { localStorage.removeItem("fb_token"); setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
 
   if (booting) return (
-    <div style={{ maxWidth: 390, margin: "0 auto", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🤝</div>
         <div style={{ fontSize: 14, color: "#4a5068" }}>Loading...</div>
@@ -1373,7 +1362,7 @@ export default function FriendlyBets() {
   const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["history","◈","History"]];
 
   return (
-    <div style={{ maxWidth: 390, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans',system-ui,sans-serif", color: C.text, position: "relative" }}>
+    <div style={{ maxWidth: 900, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans',system-ui,sans-serif", color: C.text, position: "relative" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{display:none} input::placeholder,textarea::placeholder{color:#4a5068}`}</style>
 
       {/* Auth screens */}
@@ -1392,7 +1381,7 @@ export default function FriendlyBets() {
           </div>
           {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setScreen("home"); }} />}
           {resolveBet && <ResolveModal bet={resolveBet} onClose={() => setResolveBet(null)} />}
-          <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 390, background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 8px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100 }}>
+          <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 900, background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 8px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100 }}>
             {nav.map(([k,icon,label]) => (
               <button key={k} onClick={() => setScreen(k)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 4px", borderRadius: 12, border: "none", cursor: "pointer", background: screen===k ? C.green+"10" : "transparent", color: screen===k ? C.green : C.muted, fontFamily: "inherit" }}>
                 <span style={{ fontSize: 18 }}>{icon}</span>
