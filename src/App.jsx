@@ -1351,7 +1351,7 @@ export default function FriendlyBets() {
   const handleLogout = () => { localStorage.removeItem("fb_token"); setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
 
   if (booting) return (
-    <div style={{ maxWidth: 900, margin: "0 auto", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ width: "100%", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🤝</div>
         <div style={{ fontSize: 14, color: "#4a5068" }}>Loading...</div>
@@ -1362,7 +1362,7 @@ export default function FriendlyBets() {
   const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["history","◈","History"]];
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans',system-ui,sans-serif", color: C.text, position: "relative" }}>
+    <div style={{ maxWidth: 960, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans',system-ui,sans-serif", color: C.text, position: "relative" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{display:none} input::placeholder,textarea::placeholder{color:#4a5068}`}</style>
 
       {/* Auth screens */}
@@ -1381,7 +1381,7 @@ export default function FriendlyBets() {
           </div>
           {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setScreen("home"); }} />}
           {resolveBet && <ResolveModal bet={resolveBet} onClose={() => setResolveBet(null)} />}
-          <div style={{ position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 900, background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 8px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100 }}>
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, width: "100%", background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 24px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100, maxWidth: 960, margin: "0 auto" }}>
             {nav.map(([k,icon,label]) => (
               <button key={k} onClick={() => setScreen(k)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 4px", borderRadius: 12, border: "none", cursor: "pointer", background: screen===k ? C.green+"10" : "transparent", color: screen===k ? C.green : C.muted, fontFamily: "inherit" }}>
                 <span style={{ fontSize: 18 }}>{icon}</span>
