@@ -1008,13 +1008,13 @@ function SplashScreen({ onLogin, onSignup }) {
       {/* Logo */}
       <div style={{ textAlign: "center", marginBottom: 48 }}>
         <div style={{ fontSize: 56, marginBottom: 16 }}>🤝</div>
-        <div style={{ fontSize: 36, fontWeight: 800, color: C.text, letterSpacing: -1, marginBottom: 8 }}>FriendlyBets</div>
-        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6 }}>Bet on anything with your crew.<br/>Spreads, props, or pure chaos.</div>
+        <div style={{ fontSize: 36, fontWeight: 800, color: C.text, letterSpacing: -1, marginBottom: 8 }}>You're On</div>
+        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6 }}>Private challenges with your crew.<br/>Sports, weight loss, jelly beans, anything.</div>
       </div>
 
       {/* Feature pills */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 48 }}>
-        {["⚡ Sports Spreads","👑 Custom Bets","🔒 Private Rooms","📊 Live Tracking"].map(f => (
+        {["⚡ Sports Challenges","👑 Referee Decides","🔒 Private Groups","📊 Live Tracking"].map(f => (
           <span key={f} style={{ fontSize: 11, color: C.muted, background: C.card, border: `1px solid ${C.border}`, padding: "6px 12px", borderRadius: 20 }}>{f}</span>
         ))}
       </div>
@@ -1062,7 +1062,7 @@ function LoginScreen({ onLogin, onSignup, onBack }) {
 
       <div style={{ marginBottom: 36 }}>
         <div style={{ fontSize: 28, fontWeight: 800, color: C.text, marginBottom: 6 }}>Welcome back</div>
-        <div style={{ fontSize: 13, color: C.muted }}>Sign in to your FriendlyBets account</div>
+        <div style={{ fontSize: 13, color: C.muted }}>Sign in to your You're On account</div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 24 }}>
@@ -1509,7 +1509,7 @@ function AdminScreen({ user, onBack }) {
         <button onClick={onBack} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "6px 14px", color: C.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>← Back</button>
         <div>
           <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>Admin Panel</div>
-          <div style={{ fontSize: 11, color: C.muted }}>FriendlyBets management</div>
+          <div style={{ fontSize: 11, color: C.muted }}>You're On — Admin</div>
         </div>
       </div>
 
@@ -1765,7 +1765,7 @@ function AdminScreen({ user, onBack }) {
   );
 }
 
-export default function FriendlyBets() {
+export default function YoureOn() {
   const [authScreen, setAuthScreen] = useState("splash");
   const [currentUser, setCurrentUser] = useState(null);
   const [screen, setScreen] = useState("home");
