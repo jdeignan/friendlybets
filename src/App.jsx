@@ -1381,7 +1381,7 @@ function ResolveModal({ bet, onClose, onClosed }) {
                   const net = val - bet.amount;
                   return (
                     <div key={p} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 10, background: C.bg, border: `1px solid ${C.border}` }}>
-                      <span style={{ flex: 1, fontSize: 13, color: C.text }}}>@{p}</span>
+                      <span style={{ flex: 1, fontSize: 13, color: C.text }}>@{p}</span>
                       <span style={{ color: C.muted }}>$</span>
                       <input type="number" min="0" value={customAmounts[p]} onChange={e => setCustomAmounts(a => ({...a, [p]: e.target.value}))}
                         style={{ width: 70, padding: "6px 8px", borderRadius: 8, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", textAlign: "right" }} />
