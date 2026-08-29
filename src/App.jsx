@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 
 const API = "https://friendlybets-backend-production.up.railway.app/api";
-const ODDS_API_KEY = "4e2140f050f016962ce51ac29daf1f9c";
 
 async function apiFetch(path, opts = {}) {
   const token = localStorage.getItem("fb_token");
@@ -28,7 +27,37 @@ function useApi(path, deps = []) {
 
 
 
-const C = { bg: "#0d0f14", card: "#13161e", border: "#1e2330", green: "#00e676", red: "#ff4d6d", gold: "#ffd166", blue: "#4cc9f0", purple: "#a78bfa", text: "#e8eaf0", muted: "#4a5068" };
+const C = { bg: "#16233a", card: "#13161e", border: "#1e2330", green: "#00e676", red: "#ff4d6d", gold: "#ffd166", blue: "#4cc9f0", purple: "#a78bfa", text: "#e8eaf0", muted: "#ffffff" };
+
+// Global toast: any component can call toastError(e) or toastSuccess(message) and it'll show here for 3s.
+function ErrorToast() {
+  const [toast, setToast] = useState(null); // { msg, type }
+  useEffect(() => {
+    window.__fbToast = (msg, type) => setToast({ msg, type: type || "error" });
+    return () => { delete window.__fbToast; };
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+  if (!toast) return null;
+  const color = toast.type === "success" ? C.green : C.red;
+  return (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 3000, display: "flex", justifyContent: "center", padding: "12px 16px", pointerEvents: "none" }}>
+      <div style={{ background: color+"e6", color: toast.type === "success" ? "#000" : "#fff", fontSize: 12, fontWeight: 700, padding: "10px 18px", borderRadius: 12, maxWidth: 480, textAlign: "center", boxShadow: "0 8px 24px rgba(0,0,0,0.4)", pointerEvents: "auto" }}>
+        {toast.msg}
+      </div>
+    </div>
+  );
+}
+function toastError(e) {
+  const m = (e && e.message) ? e.message : "Something went wrong";
+  if (window.__fbToast) window.__fbToast(m, "error");
+}
+function toastSuccess(m) {
+  if (window.__fbToast) window.__fbToast(m, "success");
+}
 
 function Avatar({ name, size = 36, color = C.green, animalId = null }) {
   if (animalId) {
@@ -43,13 +72,54 @@ function Avatar({ name, size = 36, color = C.green, animalId = null }) {
 }
 
 function Pill({ status }) {
-  const m = { live: [C.red, "● LIVE"], active: [C.green, "● ACTIVE"], closed: [C.muted, "✓ SETTLED"], pending: [C.gold, "◎ PENDING"] }[status] || [C.muted, status];
+  const m = { live: [C.red, "● LIVE"], active: [C.green, "● ACTIVE"], settled: [C.muted, "✓ SETTLED"], pending: [C.gold, "◎ PENDING"] }[status] || [C.muted, status];
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: m[0], background: m[0]+"18", border: `1px solid ${m[0]}30`, padding: "3px 8px", borderRadius: 20 }}>{m[1]}</span>;
 }
 
 function CatBadge({ category }) {
   const isA = category === "admin";
   return <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.8, color: isA ? C.purple : C.blue, background: isA ? C.purple+"18" : C.blue+"18", border: `1px solid ${isA ? C.purple : C.blue}30`, padding: "2px 7px", borderRadius: 20 }}>{isA ? "👑 ADMIN" : "⚡ FACTUAL"}</span>;
+}
+
+function venmoLinks(toUsername, amount, note) {
+  return {
+    app: `venmo://paycharge?txn=pay&recipients=${encodeURIComponent(toUsername)}&amount=${amount}&note=${encodeURIComponent(note)}`,
+    web: `https://venmo.com/${encodeURIComponent(toUsername)}`,
+  };
+}
+
+function VenmoButton({ toUsername, amount, note }) {
+  const { app, web } = venmoLinks(toUsername, amount, note);
+  const handleClick = (e) => {
+    e.stopPropagation();
+    // Try the native app deep link first; fall back to the web profile if it doesn't take
+    // (desktop browsers, or Venmo not installed) after a short delay.
+    const fallback = setTimeout(() => { window.open(web, "_blank"); }, 800);
+    window.addEventListener("blur", () => clearTimeout(fallback), { once: true });
+    window.location.href = app;
+  };
+  return (
+    <button onClick={handleClick}
+      style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid #3d95ce55", background: "#3d95ce18", color: "#3d95ce", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+      💸 Pay @{toUsername}
+    </button>
+  );
+}
+
+// Compact "you owe $X" banner shown on settled bet cards.
+function VenmoRow({ bet, currentUser }) {
+  const payouts = bet.payouts;
+  if (!currentUser || !Array.isArray(payouts) || payouts.length === 0) return null;
+  const mine = payouts.find(p => String(p.user_id) === String(currentUser.id));
+  if (!mine || mine.net >= 0) return null;
+  if (!bet.creator_name || bet.creator_name === currentUser.username) return null;
+  const amount = Math.abs(mine.net);
+  return (
+    <div style={{ marginTop: 10, padding: "10px 12px", background: "#3d95ce10", borderRadius: 10, border: "1px solid #3d95ce30", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <span style={{ fontSize: 11, color: "#3d95ce", fontWeight: 700 }}>You owe ${amount}</span>
+      <VenmoButton toUsername={bet.creator_name} amount={amount} note={`FriendlyBets: ${bet.title}`} />
+    </div>
+  );
 }
 
 function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
@@ -63,7 +133,7 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
   };
   const [updates, setUpdates] = useState(parseUpdates(bet.updates));
   const [postingUpdate, setPostingUpdate] = useState(false);
-  const isCreator = currentUser && (bet.creator_name === currentUser.username || bet.my_username === currentUser.username || String(bet.admin_id) === String(currentUser.id) || String(bet.creator_id) === String(currentUser.id));
+  const isCreator = currentUser && (String(bet.creator_id) === String(currentUser.id) || (bet.creator_name && bet.creator_name === currentUser.username));
 
   const formatDate = (t) => {
     if (!t) return "Not set";
@@ -79,9 +149,10 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
       await apiFetch(`/bets/${bet.id}`, { method: "DELETE" });
       onClose();
       if (onDeleted) { onDeleted(); } else { window.location.reload(); }
-    } catch (e) { 
+    } catch (e) {
       console.error("Delete failed:", e);
-      setDeleting(false); 
+      toastError(e);
+      setDeleting(false);
       setConfirmDelete(false);
     }
   };
@@ -95,14 +166,14 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
       await apiFetch(`/bets/${bet.id}/update`, { method: "POST", body: JSON.stringify({ update: update }) });
       setUpdates(newUpdates);
       setUpdate("");
-    } catch {}
+    } catch (e) { toastError(e); }
     setPostingUpdate(false);
   };
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }} onClick={onClose}>
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", maxHeight: "85vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>CHALLENGE DETAILS</div>
+        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>BET DETAILS</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 16 }}>{bet.title}</div>
         <div style={{ fontSize: 13, color: "#9aa0b8", lineHeight: 1.7, marginBottom: 20 }}>{bet.description || "No description"}</div>
 
@@ -125,6 +196,24 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
             ))}
           </div>
         </div>
+
+        {/* Settlement breakdown + Venmo pay links */}
+        {bet.status === "settled" && Array.isArray(bet.payouts) && bet.payouts.length > 0 && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 9, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>💰 SETTLEMENT</div>
+            {bet.payouts.map((p, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "#0d0f14", borderRadius: 10, padding: "10px 14px", marginBottom: 6, gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: C.text }}>@{p.username}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: p.net >= 0 ? C.green : C.red }}>{p.net >= 0 ? "+" : ""}${p.net}</span>
+                  {p.net < 0 && bet.creator_name && p.username !== bet.creator_name && (
+                    <VenmoButton toUsername={bet.creator_name} amount={Math.abs(p.net)} note={`FriendlyBets: ${bet.title}`} />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Guesses for guess bets */}
         {(bet.category === "guess" || bet.bet_type === "guess") && bet.guesses_list && bet.guesses_list.length > 0 && (
@@ -182,7 +271,7 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
                 <div style={{ fontSize: 9, color: C.muted }}>@{u.author} · {new Date(u.time).toLocaleDateString()}</div>
               </div>
             ))}
-            {isCreator && bet.status !== "closed" && (
+            {isCreator && bet.status !== "settled" && (
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <input value={update} onChange={e => setUpdate(e.target.value)} placeholder="Post an update..."
                   style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
@@ -197,10 +286,10 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
 
         {/* Action buttons */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {(bet.category === "admin" || bet.bet_type === "admin") && bet.status !== "closed" && isCreator && (
+          {(bet.category === "admin" || bet.bet_type === "admin") && bet.status !== "settled" && isCreator && (
             <button onClick={() => { onClose(); onResolve && onResolve(bet); }}
               style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"15", border: `1px solid ${C.gold}30`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-              🏆 Close
+              🏆 Settle
             </button>
           )}
           {isCreator && (
@@ -220,14 +309,92 @@ function Modal({ bet, onClose, onResolve, onDeleted, currentUser }) {
   );
 }
 
+function InviteExistingModal({ bet, onClose, onInvited }) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState([]);
+  const [invitees, setInvitees] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(false);
+
+  const searchUsers = async (q) => {
+    setSearch(q);
+    if (q.length < 2) { setResults([]); return; }
+    try {
+      const res = await apiFetch(`/users/search?q=${encodeURIComponent(q)}`);
+      setResults(res.filter(u => !invitees.find(i => i.id === u.id)));
+    } catch (e) { toastError(e); }
+  };
+
+  const addInvitee = (u) => { setInvitees(i => [...i, u]); setResults([]); setSearch(""); };
+  const removeInvitee = (id) => setInvitees(i => i.filter(u => u.id !== id));
+
+  const sendInvites = async () => {
+    if (invitees.length === 0) return;
+    setSending(true);
+    try {
+      await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
+      setDone(true);
+      setTimeout(() => { onInvited && onInvited(); onClose(); }, 1000);
+    } catch (e) { toastError(e); setSending(false); }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 2000 }} onClick={onClose}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "80vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>INVITE TO BET</div>
+        <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 16 }}>{bet.title}</div>
+        {done ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>✉️</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.green }}>Invites sent!</div>
+          </div>
+        ) : (
+          <>
+            <input placeholder="Search by username..." value={search} onChange={e => searchUsers(e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            {results.length > 0 && (
+              <div style={{ background: "#0a0c12", border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+                {results.map(u => (
+                  <div key={u.id} onClick={() => addInvitee(u)}
+                    style={{ padding: "10px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10, borderBottom: `1px solid ${C.border}` }}>
+                    <Avatar name={u.username} size={28} color={C.blue} animalId={u.animal_id} />
+                    <span style={{ fontSize: 13, color: C.text }}>@{u.username}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {invitees.length > 0 && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+                {invitees.map(u => (
+                  <span key={u.id} onClick={() => removeInvitee(u.id)}
+                    style={{ fontSize: 11, color: C.green, background: C.green+"15", border: `1px solid ${C.green}30`, padding: "4px 10px", borderRadius: 20, cursor: "pointer" }}>
+                    @{u.username} ✕
+                  </span>
+                ))}
+              </div>
+            )}
+            <button onClick={sendInvites} disabled={invitees.length === 0 || sending}
+              style={{ width: "100%", marginTop: 20, padding: 14, borderRadius: 12, border: "none", cursor: invitees.length === 0 || sending ? "not-allowed" : "pointer", background: invitees.length === 0 || sending ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: invitees.length === 0 || sending ? C.muted : "#000", fontWeight: 800, fontSize: 14, fontFamily: "inherit" }}>
+              {sending ? "Sending..." : `Send ${invitees.length || ""} Invite${invitees.length === 1 ? "" : "s"}`}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BetCard({ bet, onResolve, onDeleted, currentUser }) {
   const [show, setShow] = useState(false);
-  const pool = bet.amount * bet.participants.length;
+  const [showInvite, setShowInvite] = useState(false);
+  const isCreator = currentUser && (String(bet.creator_id) === String(currentUser.id) || (bet.creator_name && bet.creator_name === currentUser.username));
+  const pot = bet.amount * bet.participants.length;
   const diff = new Date(bet.endTime) - new Date();
   const timeLeft = diff < 0 ? "Ended" : diff < 3600000 ? `${Math.floor(diff/60000)}m left` : diff < 86400000 ? `${Math.floor(diff/3600000)}h left` : `${Math.floor(diff/86400000)}d left`;
   return (
     <>
       {show && <Modal bet={bet} onClose={() => setShow(false)} onResolve={onResolve} onDeleted={onDeleted} currentUser={currentUser} />}
+      {showInvite && <InviteExistingModal bet={bet} onClose={() => setShowInvite(false)} onInvited={onDeleted} />}
       <div style={{ background: C.card, border: `1px solid ${bet.status==="live" ? C.red+"44" : C.border}`, borderRadius: 16, padding: "16px 18px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -240,22 +407,37 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <div style={{ fontSize: 11, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{(bet.description||"").slice(0, 60)}{(bet.description||"").length > 60 ? "..." : ""}</div>
               <button onClick={e => { e.stopPropagation(); setShow(true); }} style={{ flexShrink: 0, width: 20, height: 20, borderRadius: "50%", background: "#1e2330", border: `1px solid ${C.border}`, color: C.blue, fontSize: 11, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontFamily: "inherit" }}>i</button>
+              {isCreator && bet.status === "active" && (
+                <>
+                  <button onClick={e => { e.stopPropagation(); setShowInvite(true); }} style={{ flexShrink: 0, height: 20, padding: "0 8px", borderRadius: 10, background: "#1e2330", border: `1px solid ${C.border}`, color: C.green, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>+ Invite</button>
+                  <button onClick={e => {
+                    e.stopPropagation();
+                    const link = `https://betwithfriends.netlify.app/join/${bet.id}`;
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                      navigator.clipboard.writeText(link).then(() => toastSuccess("Invite link copied!")).catch(() => toastError({ message: "Couldn't copy link" }));
+                    } else {
+                      toastError({ message: "Clipboard not available" });
+                    }
+                  }} style={{ flexShrink: 0, height: 20, padding: "0 8px", borderRadius: 10, background: "#1e2330", border: `1px solid ${C.border}`, color: C.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>🔗 Copy Link</button>
+                </>
+              )}
             </div>
           </div>
           <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
             <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${pot}</div>
-            <div style={{ fontSize: 9, color: C.muted }}>POOL</div>
+            <div style={{ fontSize: 9, color: C.muted }}>POT</div>
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 10, borderTop: `1px solid ${C.border}` }}>
           <div style={{ display: "flex", gap: 16 }}>
-            {[["MY PICK", bet.myPick, C.blue], ["PLAYERS", bet.participants.length, C.text], ["ENTRY", "$"+bet.amount, C.text]].map(([l,v,c]) => (
+            {[["MY PICK", getMyPickDisplay(bet), C.blue], ["PLAYERS", bet.participants.length, C.text], ["WAGER", "$"+bet.amount, C.text]].map(([l,v,c]) => (
               <div key={l}><div style={{ fontSize: 9, color: C.muted }}>{l}</div><div style={{ fontSize: 12, fontWeight: 600, color: c }}>{v}</div></div>
             ))}
           </div>
-          <div style={{ fontSize: 10, color: bet.status === "closed" ? C.muted : C.gold }}>{timeLeft}</div>
+          <div style={{ fontSize: 10, color: bet.status === "settled" ? C.muted : C.gold }}>{timeLeft}</div>
         </div>
         {bet.result && <div style={{ marginTop: 10, padding: "8px 12px", background: C.gold+"10", borderRadius: 8, border: `1px solid ${C.gold}20`, fontSize: 11, color: C.gold }}>🏆 {bet.result}</div>}
+        {bet.status === "settled" && <VenmoRow bet={bet} currentUser={currentUser} />}
       </div>
     </>
   );
@@ -263,7 +445,7 @@ function BetCard({ bet, onResolve, onDeleted, currentUser }) {
 
 function CreateModal({ onClose, onCreated }) {
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "", bet_type: "", my_guess: "", my_start_value: "" });
+  const [form, setForm] = useState({ title: "", description: "", category: "", isPublic: true, amount: "", endDate: "", odds_home: "", odds_away: "", home_team: "", away_team: "", my_pick: "", bet_type: "", my_guess: "", my_start_value: "", weight_unit: "pct", start_time: "" });
   const [inviteSearch, setInviteSearch] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [invitees, setInvitees] = useState([]);
@@ -280,43 +462,9 @@ function CreateModal({ onClose, onCreated }) {
     if (query.length < 2) { setGames([]); return; }
     setLoadingGames(true);
     try {
-      const sports = ["americanfootball_nfl","basketball_nba","baseball_mlb","icehockey_nhl","basketball_ncaab","americanfootball_ncaaf"];
-      const results = [];
-      for (const sport of sports) {
-        try {
-          const res = await fetch(`https://api.the-odds-api.com/v4/sports/${sport}/odds/?apiKey=${ODDS_API_KEY}&regions=us&markets=spreads,h2h&oddsFormat=american`);
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            data.forEach(game => {
-              const home = game.home_team || "";
-              const away = game.away_team || "";
-              if (home.toLowerCase().includes(query.toLowerCase()) || away.toLowerCase().includes(query.toLowerCase())) {
-                // Extract spread and moneyline
-                let spread_home = "", spread_away = "", ml_home = "", ml_away = "";
-                (game.bookmakers || []).slice(0,1).forEach(book => {
-                  (book.markets || []).forEach(market => {
-                    if (market.key === "spreads") {
-                      market.outcomes.forEach(o => {
-                        if (o.name === home) spread_home = (o.point > 0 ? "+" : "") + o.point;
-                        if (o.name === away) spread_away = (o.point > 0 ? "+" : "") + o.point;
-                      });
-                    }
-                    if (market.key === "h2h") {
-                      market.outcomes.forEach(o => {
-                        if (o.name === home) ml_home = (o.price > 0 ? "+" : "") + o.price;
-                        if (o.name === away) ml_away = (o.price > 0 ? "+" : "") + o.price;
-                      });
-                    }
-                  });
-                });
-                results.push({ id: game.id, sport, home, away, spread_home, spread_away, ml_home, ml_away, commence: game.commence_time });
-              }
-            });
-          }
-        } catch {}
-      }
-      setGames(results.slice(0, 8));
-    } catch {}
+      const results = await apiFetch(`/odds/search?q=${encodeURIComponent(query)}`);
+      setGames((results || []).slice(0, 8));
+    } catch (e) { toastError(e); setGames([]); }
     setLoadingGames(false);
   };
 
@@ -330,7 +478,7 @@ function CreateModal({ onClose, onCreated }) {
     const desc = isSpread
       ? `Spread bet: ${game.home} ${game.spread_home || "N/A"} / ${game.away} ${game.spread_away || "N/A"}. Resolves at final score.`
       : `Moneyline: ${game.home} ${game.ml_home || "N/A"} / ${game.away} ${game.ml_away || "N/A"}. Resolves at final score.`;
-    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA }));
+    setForm(f => ({ ...f, title, description: desc, home_team: game.home, away_team: game.away, odds_home: oddsH, odds_away: oddsA, start_time: game.commence || "" }));
     setSelectedGame(game);
     setGames([]);
     setGameSearch("");
@@ -358,6 +506,7 @@ function CreateModal({ onClose, onCreated }) {
         category: form.category,
         amount: Number(form.amount),
         endTime: form.endDate || null,
+        startTime: form.start_time || null,
         isPublic: form.isPublic,
         myPick: form.my_pick || null,
         oddsHome: form.odds_home || null,
@@ -367,15 +516,17 @@ function CreateModal({ onClose, onCreated }) {
         betType: form.bet_type || null,
         myGuess: form.my_guess || null,
         myStartValue: form.my_start_value || null,
+        weightUnit: form.category === "weight" ? (form.weight_unit || "pct") : null,
       }) });
       if (invitees.length > 0) {
         await apiFetch(`/bets/${bet.id}/invite`, { method: "POST", body: JSON.stringify({ userIds: invitees.map(u => u.id) }) });
       }
       setDone(true);
       setTimeout(() => { onCreated && onCreated(); onClose(); }, 1200);
-    } catch(e) { 
+    } catch(e) {
       console.error("Create failed:", e);
-      setSaving(false); 
+      toastError(e);
+      setSaving(false);
     }
   };
 
@@ -389,7 +540,7 @@ function CreateModal({ onClose, onCreated }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 1000 }}>
       <div style={{ background: C.card, borderRadius: "24px 24px 0 0", padding: "28px 24px 44px", width: "100%", maxWidth: 480, border: `1px solid ${C.border}`, maxHeight: "90vh", overflowY: "auto" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div><div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>New Challenge</div><div style={{ fontSize: 10, color: C.muted, letterSpacing: 1 }}>STEP {step} OF 3</div></div>
+          <div><div style={{ fontSize: 18, fontWeight: 800, color: C.text }}>New Bet</div><div style={{ fontSize: 10, color: C.muted, letterSpacing: 1 }}>STEP {step} OF 3</div></div>
           <button onClick={onClose} style={{ width: 32, height: 32, borderRadius: "50%", background: "#1e2330", border: "none", color: C.muted, fontSize: 16, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
         </div>
         <div style={{ display: "flex", gap: 4, marginBottom: 24 }}>{[1,2,3].map(s => <div key={s} style={{ flex: 1, height: 3, borderRadius: 2, background: s <= step ? C.green : C.border }} />)}</div>
@@ -401,7 +552,7 @@ function CreateModal({ onClose, onCreated }) {
               ["factual","⚡","Sports / Factual","Game spread, moneyline — outcome is automatic"],
               ["guess","🫙","Closest Guess Wins","Jelly beans, price is right, any number guess"],
               ["weight","⚖️","Weight Loss Challenge","Track % or lbs lost — winner auto-calculated"],
-              ["admin","👑","Referee Decides","Golf, custom challenges — you pick the winner"],
+              ["admin","👑","Admin Decides","Golf, custom challenges — you pick the winner"],
             ].map(([k,icon,label,desc]) => (
               <div key={k} onClick={() => { set("category", k); set("bet_type", k); setStep(2); }} style={{ padding: "16px 18px", borderRadius: 14, cursor: "pointer", background: form.category===k ? C.green+"10" : "#0d0f14", border: `1.5px solid ${form.category===k ? C.green : C.border}` }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 4 }}>{icon} {label}</div>
@@ -413,7 +564,7 @@ function CreateModal({ onClose, onCreated }) {
 
         {step === 2 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Challenge Details</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 4 }}>Bet Details</div>
 
             {/* Game search for factual bets */}
             {form.category === "factual" && (
@@ -498,7 +649,7 @@ function CreateModal({ onClose, onCreated }) {
 
             {/* Wager */}
             <div>
-              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>ENTRY PER PERSON ($)</div>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>WAGER PER PERSON ($)</div>
               <input type="number" placeholder="25" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
             </div>
 
@@ -529,15 +680,15 @@ function CreateModal({ onClose, onCreated }) {
                   <input type="number" placeholder="e.g. 185" value={form.my_start_value} onChange={e => set("my_start_value", e.target.value)}
                     style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none" }} />
                   <div style={{ display: "flex", gap: 4 }}>
-                    {["lbs", "%"].map(unit => (
-                      <button key={unit} onClick={() => set("weight_unit", unit)}
-                        style={{ padding: "0 14px", borderRadius: 10, border: `1px solid ${form.weight_unit===unit ? C.gold : C.border}`, background: form.weight_unit===unit ? C.gold+"15" : "#0d0f14", color: form.weight_unit===unit ? C.gold : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                        {unit}
+                    {[["lbs","lbs"],["pct","%"]].map(([val,label]) => (
+                      <button key={val} onClick={() => set("weight_unit", val)}
+                        style={{ padding: "0 14px", borderRadius: 10, border: `1px solid ${form.weight_unit===val ? C.gold : C.border}`, background: form.weight_unit===val ? C.gold+"15" : "#0d0f14", color: form.weight_unit===val ? C.gold : C.muted, fontWeight: 700, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                        {label}
                       </button>
                     ))}
                   </div>
                 </div>
-                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Winner = most {form.weight_unit === "%" ? "% body weight lost" : "lbs lost"} by end date</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Winner = most {form.weight_unit === "lbs" ? "lbs lost" : "% body weight lost"} by end date</div>
               </div>
             )}
 
@@ -569,12 +720,9 @@ function CreateModal({ onClose, onCreated }) {
               )}
             </div>
 
-            <div style={{ fontSize: 10, color: C.muted, padding: "8px 12px", background: "#0d0f14", borderRadius: 8, marginBottom: 8, lineHeight: 1.5 }}>
-              By creating this challenge, you confirm it is a private group challenge. You're On does not handle, hold, or process any money.
-            </div>
             <button onClick={handleCreate} disabled={!form.amount || saving}
               style={{ padding: 14, borderRadius: 12, background: form.amount && !saving ? C.green+"20" : "#1e2330", border: `1px solid ${form.amount && !saving ? C.green : C.border}`, color: form.amount && !saving ? C.green : C.muted, fontWeight: 800, fontSize: 14, cursor: form.amount && !saving ? "pointer" : "not-allowed", fontFamily: "inherit", marginTop: 4 }}>
-              {saving ? "Creating..." : "🎯 Create Challenge"}
+              {saving ? "Creating..." : "🎯 Create Bet"}
             </button>
           </div>
         )}
@@ -583,24 +731,35 @@ function CreateModal({ onClose, onCreated }) {
   );
 }
 
-function HomeScreen({ user, onLogout, onResolve }) {
-  const { data: bets, loading, reload } = useApi("/bets");
+function getMyPickDisplay(bet) {
+  const mine = (bet.guesses_list || []).find(g => g.username === bet.my_username);
+  const cat = bet.bet_type || bet.category;
+  if (cat === "guess") return mine?.guess != null ? String(mine.guess) : "—";
+  if (cat === "weight") return mine?.start_value != null ? `${mine.start_value}${bet.weight_unit === "lbs" ? " lbs" : "%"}` : "—";
+  return bet.my_pick || mine?.pick || "—";
+}
+
+function HomeScreen({ user, onLogout, onResolve, refreshSignal, onOpenAdmin }) {
+  const { data: bets, loading, reload } = useApi("/bets", [refreshSignal]);
   const [tab, setTab] = useState("active");
   const allBets = bets || [];
-  const tabs = { active: allBets.filter(b => b.status === "active"), live: allBets.filter(b => b.status === "live"), closed: allBets.filter(b => b.status === "closed") };
+  const tabs = { active: allBets.filter(b => b.status === "active"), live: allBets.filter(b => b.status === "live"), settled: allBets.filter(b => b.status === "settled") };
   const shown = tabs[tab] || [];
-  const inPlay = allBets.filter(b => b.status !== "closed").reduce((s, b) => s + b.amount * (b.participant_count || 1), 0);
+  const inPlay = allBets.filter(b => b.status !== "settled").reduce((s, b) => s + b.amount * (b.participant_count || 1), 0);
 
   return (
     <div style={{ padding: "20px 16px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 24, fontWeight: 800, color: C.text }}>My Challenges</div>
-          <div style={{ fontSize: 11, color: C.muted }}>{allBets.filter(b=>b.status!=="closed").length} active · ${inPlay} in play</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: C.text }}>My Bets</div>
+          <div style={{ fontSize: 11, color: C.muted }}>{allBets.filter(b=>b.status!=="settled").length} active · ${inPlay} in play</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <Avatar name={user?.username || "?"} size={42} animalId={user?.animal_id} color={user?.avatarColor || C.green} />
-          <button onClick={onLogout} style={{ background: "none", border: "1px solid #1e2330", borderRadius: 8, color: "#4a5068", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
+          {user?.is_admin && (
+            <button onClick={onOpenAdmin} style={{ background: C.gold + "18", border: `1px solid ${C.gold}40`, borderRadius: 8, color: C.gold, fontSize: 10, fontWeight: 700, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>⚙ Admin</button>
+          )}
+          <button onClick={onLogout} style={{ background: "none", border: "1px solid #1e2330", borderRadius: 8, color: "#ffffff", fontSize: 10, padding: "4px 8px", cursor: "pointer", fontFamily: "inherit" }}>Sign out</button>
         </div>
       </div>
 
@@ -616,7 +775,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 16, background: C.card, borderRadius: 12, padding: 4 }}>
-        {[["active","Active"],["live","● Live"],["closed","Closed"]].map(([k,label]) => (
+        {[["active","Active"],["live","● Live"],["settled","Settled"]].map(([k,label]) => (
           <button key={k} onClick={() => setTab(k)}
             style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700,
               background: tab===k ? (k==="live" ? C.red+"20" : C.green+"20") : "transparent",
@@ -629,7 +788,7 @@ function HomeScreen({ user, onLogout, onResolve }) {
       {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading bets...</div>}
       {!loading && shown.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 20px", color: C.muted }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>{tab==="live" ? "📡" : tab==="closed" ? "📋" : "🎯"}</div>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>{tab==="live" ? "📡" : tab==="settled" ? "📋" : "🎯"}</div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>No {tab} bets yet</div>
           <div style={{ fontSize: 12 }}>Tap + to create one!</div>
         </div>
@@ -687,14 +846,14 @@ function InviteCard({ inv, onResponded }) {
         body: JSON.stringify({ pick: pick || null, guess: guess || null, startValue: startValue || null }) 
       });
       onResponded();
-    } catch { setAccepting(false); }
+    } catch (e) { toastError(e); setAccepting(false); }
   };
 
   const handleDecline = async () => {
     try {
       await apiFetch(`/invites/${inv.id}/decline`, { method: "POST" });
       onResponded();
-    } catch {}
+    } catch (e) { toastError(e); }
   };
 
   return (
@@ -707,7 +866,7 @@ function InviteCard({ inv, onResponded }) {
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${inv.amount}</div>
-          <div style={{ fontSize: 9, color: C.muted }}>ENTRY</div>
+          <div style={{ fontSize: 9, color: C.muted }}>WAGER</div>
         </div>
       </div>
 
@@ -752,7 +911,7 @@ function InviteCard({ inv, onResponded }) {
           <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>ENTER YOUR GUESS TO ACCEPT</div>
           <input type="number" placeholder="Your guess..." value={guess} onChange={e => setGuess(e.target.value)}
             style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
-          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess wins the pool</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Closest guess wins the pot</div>
         </div>
       )}
 
@@ -803,8 +962,104 @@ function InvitesScreen() {
   );
 }
 
-function LiveScreen() {
-  const { data: bets, loading } = useApi("/bets");
+function FriendsScreen() {
+  const { data: friends, loading, reload } = useApi("/friends");
+  const { data: requests, reload: reloadRequests } = useApi("/friends/requests");
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState([]);
+  const [sending, setSending] = useState(false);
+
+  const searchUsers = async (q) => {
+    setSearch(q);
+    if (q.length < 2) { setResults([]); return; }
+    try {
+      const res = await apiFetch(`/users/search?q=${encodeURIComponent(q)}`);
+      setResults(res);
+    } catch (e) { toastError(e); }
+  };
+
+  const sendRequest = async (username) => {
+    setSending(true);
+    try {
+      await apiFetch("/friends/request", { method: "POST", body: JSON.stringify({ friendUsername: username }) });
+      setSearch(""); setResults([]);
+    } catch (e) { toastError(e); }
+    setSending(false);
+  };
+
+  const respond = async (id, action) => {
+    try {
+      await apiFetch(`/friends/${id}/${action}`, { method: "POST" });
+      reload(); reloadRequests();
+    } catch (e) { toastError(e); }
+  };
+
+  const list = friends || [];
+  const pending = requests || [];
+
+  return (
+    <div style={{ padding: "20px 16px" }}>
+      <div style={{ fontSize: 24, fontWeight: 800, color: C.text, marginBottom: 4 }}>Friends</div>
+      <div style={{ fontSize: 11, color: C.muted, marginBottom: 20 }}>{list.length} friends</div>
+
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>ADD A FRIEND</div>
+        <input placeholder="Search by username..." value={search} onChange={e => searchUsers(e.target.value)}
+          style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: C.card, border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+        {results.length > 0 && (
+          <div style={{ background: "#0a0c12", border: `1px solid ${C.border}`, borderRadius: 10, marginTop: 4, overflow: "hidden" }}>
+            {results.map(u => (
+              <div key={u.id} style={{ padding: "10px 14px", display: "flex", alignItems: "center", gap: 10, borderBottom: `1px solid ${C.border}` }}>
+                <Avatar name={u.username} size={28} animalId={u.animal_id} />
+                <span style={{ flex: 1, fontSize: 13, color: C.text }}>@{u.username}</span>
+                <button onClick={() => sendRequest(u.username)} disabled={sending}
+                  style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.green}40`, background: C.green + "15", color: C.green, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  Add
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {pending.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>PENDING REQUESTS ({pending.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {pending.map(r => (
+              <div key={r.friendship_id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                <Avatar name={r.username} size={32} animalId={r.animal_id} />
+                <span style={{ flex: 1, fontSize: 13, color: C.text }}>@{r.username}</span>
+                <button onClick={() => respond(r.friendship_id, "accept")} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.green}40`, background: C.green + "15", color: C.green, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✓</button>
+                <button onClick={() => respond(r.friendship_id, "decline")} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${C.red}40`, background: C.red + "10", color: C.red, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>YOUR FRIENDS</div>
+      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>}
+      {!loading && list.length === 0 && (
+        <div style={{ textAlign: "center", padding: "30px 20px", color: C.muted }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>🤝</div>
+          <div style={{ fontSize: 13 }}>No friends yet — add some above</div>
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {list.map(f => (
+          <div key={f.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+            <Avatar name={f.username} size={32} animalId={f.animal_id} />
+            <span style={{ fontSize: 13, color: C.text }}>@{f.username}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LiveScreen({ refreshSignal }) {
+  const { data: bets, loading } = useApi("/bets", [refreshSignal]);
   const live = (bets || []).filter(b => b.status === "live");
   return (
     <div style={{ padding: "20px 16px" }}>
@@ -814,7 +1069,7 @@ function LiveScreen() {
       {!loading && live.length === 0 && (
         <div style={{ textAlign: "center", padding: "40px 20px", color: C.muted }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>📡</div>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>No live challenges right now</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>No live bets right now</div>
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -835,27 +1090,27 @@ function LiveScreen() {
 
 
 
-function HistoryScreen() {
-  const { data: bets, loading } = useApi("/bets");
+function HistoryScreen({ refreshSignal }) {
+  const { data: bets, loading } = useApi("/bets", [refreshSignal]);
   const [filterUser, setFilterUser] = useState(null);
   const allBets = bets || [];
 
-  // Get all closed bets
-  const closed = allBets.filter(b => b.status === "closed");
+  // Get all settled bets
+  const settled = allBets.filter(b => b.status === "settled");
 
-  // Build opponent list from closed bets
+  // Build opponent list from settled bets
   const opponents = [...new Set(
-    closed.flatMap(b => (b.participants_list || []).filter(p => p !== b.my_username))
+    settled.flatMap(b => (b.participants_list || []).filter(p => p !== b.my_username))
   )];
 
   // Filter by opponent if selected
   const filtered = filterUser
-    ? closed.filter(b => (b.participants_list || []).includes(filterUser))
-    : closed;
+    ? settled.filter(b => (b.participants_list || []).includes(filterUser))
+    : settled;
 
   // Compute H2H stats from real data
   const h2h = filterUser ? (() => {
-    const shared = closed.filter(b => (b.participants_list || []).includes(filterUser));
+    const shared = settled.filter(b => (b.participants_list || []).includes(filterUser));
     const wins = shared.filter(b => b.result && b.result.includes("won") && b.creator_name !== filterUser).length;
     const losses = shared.length - wins;
     return { wins, losses, bets: shared.length };
@@ -926,7 +1181,7 @@ function HistoryScreen() {
       {/* Monthly chart */}
       {!filterUser && monthlyData.months.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 18, marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 16 }}>$ ENTRYED — MONTHLY</div>
+          <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 16 }}>$ WAGERED — MONTHLY</div>
           <div style={{ display: "flex", gap: 6, alignItems: "flex-end", height: 80 }}>
             {monthlyData.months.map((m, i) => (
               <div key={m} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
@@ -936,7 +1191,7 @@ function HistoryScreen() {
             ))}
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
-            {[[closed.length + " bets","Closed",C.blue],[allBets.filter(b=>b.status!=="closed").length+" bets","Active",C.green]].map(([v,l,c]) => (
+            {[[settled.length + " bets","Settled",C.blue],[allBets.filter(b=>b.status!=="settled").length+" bets","Active",C.green]].map(([v,l,c]) => (
               <div key={l} style={{ flex: 1, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: c }}>{v}</div><div style={{ fontSize: 9, color: C.muted }}>{l}</div></div>
             ))}
           </div>
@@ -949,7 +1204,7 @@ function HistoryScreen() {
       {!loading && filtered.length === 0 && (
         <div style={{ textAlign: "center", padding: "30px 20px", color: C.muted, fontSize: 13 }}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>📋</div>
-          {filterUser ? `No closed bets with @${filterUser} yet` : "No closed bets yet"}
+          {filterUser ? `No settled bets with @${filterUser} yet` : "No settled bets yet"}
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
@@ -1008,13 +1263,13 @@ function SplashScreen({ onLogin, onSignup }) {
       {/* Logo */}
       <div style={{ textAlign: "center", marginBottom: 48 }}>
         <div style={{ fontSize: 56, marginBottom: 16 }}>🤝</div>
-        <div style={{ fontSize: 36, fontWeight: 800, color: C.text, letterSpacing: -1, marginBottom: 8 }}>You're On</div>
-        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6 }}>Private challenges with your crew.<br/>Sports, weight loss, jelly beans, anything.</div>
+        <div style={{ fontSize: 36, fontWeight: 800, color: C.text, letterSpacing: -1, marginBottom: 8 }}>FriendlyBets</div>
+        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.6 }}>Bet on anything with your crew.<br/>Spreads, props, or pure chaos.</div>
       </div>
 
       {/* Feature pills */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "center", marginBottom: 48 }}>
-        {["⚡ Sports Challenges","👑 Referee Decides","🔒 Private Groups","📊 Live Tracking"].map(f => (
+        {["⚡ Sports Spreads","👑 Custom Bets","🔒 Private Rooms","📊 Live Tracking"].map(f => (
           <span key={f} style={{ fontSize: 11, color: C.muted, background: C.card, border: `1px solid ${C.border}`, padding: "6px 12px", borderRadius: 20 }}>{f}</span>
         ))}
       </div>
@@ -1036,7 +1291,7 @@ function SplashScreen({ onLogin, onSignup }) {
   );
 }
 
-function LoginScreen({ onLogin, onSignup, onBack }) {
+function LoginScreen({ onLogin, onSignup, onBack, onForgot }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -1050,10 +1305,10 @@ function LoginScreen({ onLogin, onSignup, onBack }) {
     try {
       const res = await fetch(API + "/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || "Login failed"); setLoading(false); return; }
+      if (!res.ok) { setError(data.error || "Login failed"); toastError({ message: data.error || "Login failed" }); setLoading(false); return; }
       localStorage.setItem("fb_token", data.token);
       onLogin({ ...data.user, avatarColor: data.user.avatar_color });
-    } catch { setError("Connection error - try again"); setLoading(false); }
+    } catch { setError("Connection error - try again"); toastError({ message: "Connection error - try again" }); setLoading(false); }
   };
 
   return (
@@ -1062,12 +1317,15 @@ function LoginScreen({ onLogin, onSignup, onBack }) {
 
       <div style={{ marginBottom: 36 }}>
         <div style={{ fontSize: 28, fontWeight: 800, color: C.text, marginBottom: 6 }}>Welcome back</div>
-        <div style={{ fontSize: 13, color: C.muted }}>Sign in to your You're On account</div>
+        <div style={{ fontSize: 13, color: C.muted }}>Sign in to your FriendlyBets account</div>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 24 }}>
         <Input label="USERNAME" value={username} onChange={setUsername} placeholder="your_username" />
         <Input label="PASSWORD" type="password" value={password} onChange={setPassword} placeholder="••••••••" error={error} />
+        <div style={{ textAlign: "right" }}>
+          <span onClick={onForgot} style={{ fontSize: 12, color: C.blue, cursor: "pointer", fontWeight: 600 }}>Forgot password?</span>
+        </div>
       </div>
 
       {/* Remember me */}
@@ -1089,6 +1347,119 @@ function LoginScreen({ onLogin, onSignup, onBack }) {
       </div>
 
 
+    </div>
+  );
+}
+
+function ForgotPasswordScreen({ onBack }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+
+  const requestReset = async () => {
+    if (!email) { setError("Enter your email"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(API + "/auth/forgot-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Something went wrong"); toastError({ message: data.error || "Something went wrong" }); setLoading(false); return; }
+      setSent(true);
+    } catch { setError("Connection error - try again"); toastError({ message: "Connection error - try again" }); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", padding: 24 }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: C.muted, fontSize: 22, cursor: "pointer", alignSelf: "flex-start", padding: "4px 0", fontFamily: "inherit", marginBottom: 32 }}>←</button>
+
+      {!sent ? (
+        <>
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: C.text, marginBottom: 6 }}>Reset password</div>
+            <div style={{ fontSize: 13, color: C.muted }}>Enter your account email and we'll send you a reset link.</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 24 }}>
+            <Input label="EMAIL" type="email" value={email} onChange={setEmail} placeholder="you@email.com" error={error} />
+          </div>
+          <button onClick={requestReset} disabled={loading}
+            style={{ width: "100%", padding: 15, borderRadius: 14, border: "none", cursor: loading ? "not-allowed" : "pointer", background: loading ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: loading ? C.muted : "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
+            {loading ? "Sending..." : "Send Reset Link"}
+          </button>
+        </>
+      ) : (
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>📬</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: C.green, marginBottom: 8 }}>Check your email</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 28, maxWidth: 320 }}>If that email exists, we've sent a reset link. It expires in 1 hour.</div>
+          <button onClick={onBack}
+            style={{ width: "100%", maxWidth: 320, padding: 15, borderRadius: 14, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${C.green},#00b050)`, color: "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
+            Back to Sign In
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResetPasswordScreen({ token, onDone }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => onDone(), 2000);
+    return () => clearTimeout(t);
+  }, [done]);
+
+  const submit = async () => {
+    if (!newPassword) { setError("Enter a new password"); return; }
+    if (newPassword !== confirm) { setError("Passwords don't match"); return; }
+    if (newPassword.length < 6) { setError("At least 6 characters"); return; }
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(API + "/auth/reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, newPassword }) });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Reset failed"); toastError({ message: data.error || "Reset failed" }); setLoading(false); return; }
+      setDone(true);
+    } catch { setError("Connection error - try again"); toastError({ message: "Connection error - try again" }); }
+    setLoading(false);
+  };
+
+  if (!token) return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🤔</div>
+      <div style={{ fontSize: 15, color: C.text, fontWeight: 700, marginBottom: 8 }}>Missing reset token</div>
+      <div style={{ fontSize: 12, color: C.muted }}>Use the link from your password reset email.</div>
+      <button onClick={onDone} style={{ marginTop: 20, padding: "10px 20px", borderRadius: 12, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, fontFamily: "inherit", cursor: "pointer" }}>Back to Sign In</button>
+    </div>
+  );
+
+  if (done) return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>✅</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: C.green, marginBottom: 8 }}>Password reset</div>
+      <div style={{ fontSize: 13, color: C.muted }}>Redirecting you to sign in...</div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", padding: 24, maxWidth: 420, margin: "0 auto" }}>
+      <div style={{ marginTop: 40, marginBottom: 28 }}>
+        <div style={{ fontSize: 28, fontWeight: 800, color: C.text, marginBottom: 6 }}>Set new password</div>
+        <div style={{ fontSize: 13, color: C.muted }}>Choose a new password for your account.</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 24 }}>
+        <Input label="NEW PASSWORD" type="password" value={newPassword} onChange={setNewPassword} placeholder="Min 6 characters" />
+        <Input label="CONFIRM PASSWORD" type="password" value={confirm} onChange={setConfirm} placeholder="Same as above" error={error} />
+      </div>
+      <button onClick={submit} disabled={loading}
+        style={{ width: "100%", padding: 15, borderRadius: 14, border: "none", cursor: loading ? "not-allowed" : "pointer", background: loading ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: loading ? C.muted : "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
+        {loading ? "Resetting..." : "Reset Password"}
+      </button>
     </div>
   );
 }
@@ -1123,10 +1494,10 @@ function SignupScreen({ onSignup, onLogin, onBack }) {
     try {
       const res = await fetch(API + "/signup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username: form.username, email: form.email, password: form.password, avatarColor: form.avatarColor, animalId: form.animalId || "bear" }) });
       const data = await res.json();
-      if (!res.ok) { setErrors({ confirm: data.error || "Signup failed" }); setLoading(false); return; }
+      if (!res.ok) { setErrors({ confirm: data.error || "Signup failed" }); toastError({ message: data.error || "Signup failed" }); setLoading(false); return; }
       localStorage.setItem("fb_token", data.token);
       onSignup({ ...data.user, avatarColor: data.user.avatar_color });
-    } catch { setErrors({ confirm: "Connection error - try again" }); setLoading(false); }
+    } catch { setErrors({ confirm: "Connection error - try again" }); toastError({ message: "Connection error - try again" }); setLoading(false); }
   };
 
   return (
@@ -1203,73 +1574,73 @@ function SignupScreen({ onSignup, onLogin, onBack }) {
 }
 
 
-function ResolveModal({ bet, onClose, onClosed }) {
-  const pool = bet.amount * bet.participants.length;
-  const betType = bet.bet_type || bet.category;
+function ResolveModal({ bet, onClose, onSettled }) {
+  const participants = bet.participants_list || [];
+  const guessesList = bet.guesses_list || [];
+  const pot = bet.amount * (participants.length || 1);
+  const betCategory = bet.bet_type || bet.category;
+  const isGuess = betCategory === "guess";
+  const isWeight = betCategory === "weight";
+  const weightUnit = bet.weight_unit === "lbs" ? "lbs" : "pct";
 
-  // Mode: auto (type-aware) or override (manual)
-  const [mode, setMode] = useState(betType === "admin" ? "override" : "auto");
-
-  // Guess
-  const [answer, setAnswer] = useState("");
-
-  // Sports score
-  const [score, setScore] = useState({ home: "", away: "" });
-
-  // Weight
-  const [weights, setWeights] = useState({});
-
-  // Admin override — equal split or custom
-  const [splitMode, setSplitMode] = useState("equal");
+  const [mode, setMode] = useState("equal"); // equal | custom — admin/factual manual override
   const [winners, setWinners] = useState([]);
-  const [customAmounts, setCustomAmounts] = useState(Object.fromEntries(bet.participants.map(p => [p, 0])));
+  const [customAmounts, setCustomAmounts] = useState(
+    Object.fromEntries(participants.map(p => [p, 0]))
+  );
+  const [guessAnswer, setGuessAnswer] = useState("");
+  const [endValues, setEndValues] = useState(Object.fromEntries(participants.map(p => [p, ""])));
   const [note, setNote] = useState("");
-
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState(false);
-  const [err, setErr] = useState("");
 
   const toggleWinner = (p) => setWinners(w => w.includes(p) ? w.filter(x => x !== p) : [...w, p]);
-  const equalPrize = winners.length > 0 ? Math.round(pot / winners.length) : 0;
-  const customTotal = Object.values(customAmounts).reduce((s, v) => s + Number(v), 0);
-  const customValid = customTotal === pool;
 
-  const handleClose = async () => {
-    setErr(""); setSaving(true);
+  const equalPayout = winners.length > 0 ? Math.round(pot / winners.length) : 0;
+  const customTotal = Object.values(customAmounts).reduce((s, v) => s + Number(v), 0);
+  const customValid = customTotal === pot;
+
+  const canSubmit = () => {
+    if (isGuess) return guessAnswer !== "" && !isNaN(Number(guessAnswer));
+    if (isWeight) return participants.length > 0 && participants.every(p => endValues[p] !== "" && !isNaN(Number(endValues[p])));
+    return (mode === "equal" && winners.length > 0) || (mode === "custom" && customValid);
+  };
+
+  const handleResolve = async () => {
+    if (!canSubmit() || saving) return;
+    setSaving(true);
     try {
-      if (mode === "auto" && betType === "guess") {
-        if (!answer) { setErr("Enter the correct answer"); setSaving(false); return; }
-        await apiFetch(`/bets/${bet.id}/resolve-guess`, { method: "POST", body: JSON.stringify({ answer }) });
-      } else if (mode === "auto" && betType === "weight") {
-        const results = Object.entries(weights).map(([username, endValue]) => ({ username, endValue: parseFloat(endValue) })).filter(r => !isNaN(r.endValue));
-        if (results.length === 0) { setErr("Enter at least one ending weight"); setSaving(false); return; }
-        await apiFetch(`/bets/${bet.id}/resolve-weight`, { method: "POST", body: JSON.stringify({ results }) });
-      } else if (mode === "auto" && betType === "factual") {
-        if (!score.home || !score.away) { setErr("Enter both scores"); setSaving(false); return; }
-        const result = `Final: ${bet.home_team || "Home"} ${score.home} - ${bet.away_team || "Away"} ${score.away}${note ? " · " + note : ""}`;
-        await apiFetch(`/bets/${bet.id}/resolve`, { method: "POST", body: JSON.stringify({ result }) });
+      const body = {};
+      if (note) body.result = note;
+      if (isGuess) {
+        body.guessAnswer = guessAnswer;
+      } else if (isWeight) {
+        body.endValues = participants
+          .map(username => {
+            const p = guessesList.find(g => g.username === username);
+            return p ? { userId: p.user_id, endValue: endValues[username] } : null;
+          })
+          .filter(Boolean);
+      } else if (mode === "custom") {
+        body.customAmounts = customAmounts;
       } else {
-        // Override mode
-        if (splitMode === "equal") {
-          if (winners.length === 0) { setErr("Select at least one winner"); setSaving(false); return; }
-          const result = `Winners: ${winners.map(w => "@"+w).join(", ")} · $${equalPrize} each${note ? " · " + note : ""}`;
-          await apiFetch(`/bets/${bet.id}/resolve`, { method: "POST", body: JSON.stringify({ result }) });
-        } else {
-          if (!customValid) { setErr(`Total must equal $${pot}`); setSaving(false); return; }
-          const result = `Custom prize${note ? ": " + note : ""}`;
-          await apiFetch(`/bets/${bet.id}/resolve`, { method: "POST", body: JSON.stringify({ result }) });
-        }
+        body.winnerUsernames = winners;
       }
+      await apiFetch(`/bets/${bet.id}/resolve`, { method: "POST", body: JSON.stringify(body) });
       setDone(true);
-      setTimeout(() => { onClosed && onClosed(); onClose(); }, 1500);
-    } catch(e) { setErr(e.message); setSaving(false); }
+      setTimeout(() => { onSettled && onSettled(); onClose(); }, 1400);
+    } catch (e) {
+      toastError(e);
+      setSaving(false);
+    }
   };
 
   if (done) return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.9)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000 }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
-        <div style={{ fontSize: 20, fontWeight: 800, color: C.green }}>Challenge Closed!</div>
+        <div style={{ fontSize: 20, fontWeight: 800, color: C.green }}>Bet Settled!</div>
+        <div style={{ fontSize: 13, color: C.muted, marginTop: 8 }}>Results saved</div>
       </div>
     </div>
   );
@@ -1278,501 +1649,489 @@ function ResolveModal({ bet, onClose, onClosed }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 2000 }} onClick={onClose}>
       <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 40, height: 4, borderRadius: 2, background: C.border, margin: "0 auto 20px" }} />
-        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>CLOSE CHALLENGE</div>
+        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>RESOLVE BET</div>
         <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 4 }}>{bet.title}</div>
-        <div style={{ fontSize: 13, color: C.gold, fontWeight: 700, marginBottom: 20 }}>💰 Pool: ${pot} · {bet.participants.length} players</div>
+        <div style={{ fontSize: 13, color: C.gold, fontWeight: 700, marginBottom: 20 }}>💰 Total pot: ${pot}</div>
 
-        {/* Mode toggle — only show if not admin-only */}
-        {betType !== "admin" && (
-          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-            {[["auto","🤖 Auto Score"],["override","✏️ Manual"]].map(([m,l]) => (
-              <button key={m} onClick={() => setMode(m)}
-                style={{ flex: 1, padding: "9px 8px", borderRadius: 10, border: `1.5px solid ${mode===m ? C.green : C.border}`, background: mode===m ? C.green+"15" : "transparent", color: mode===m ? C.green : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                {l}
-              </button>
-            ))}
+        {isGuess && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>WHAT'S THE CORRECT ANSWER?</div>
+            <input type="number" placeholder="e.g. 847" value={guessAnswer} onChange={e => setGuessAnswer(e.target.value)}
+              style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0a0c12", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 12 }} />
+            {guessesList.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {guessesList.map(g => (
+                  <div key={g.username} style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", background: C.bg, borderRadius: 10, border: `1px solid ${C.border}` }}>
+                    <span style={{ fontSize: 12, color: C.text }}>@{g.username}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: C.blue }}>{g.guess ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ fontSize: 10, color: C.muted, marginTop: 8 }}>Closest guess wins the pot — ties split it.</div>
           </div>
         )}
 
-        {/* AUTO — GUESS */}
-        {mode === "auto" && betType === "guess" && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>🫙 CORRECT ANSWER</div>
-            <input type="number" placeholder="e.g. 847" value={answer} onChange={e => setAnswer(e.target.value)}
-              style={{ width: "100%", padding: "14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 24, fontFamily: "inherit", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Machine finds closest guess and declares winner automatically</div>
-          </div>
-        )}
-
-        {/* AUTO — SPORTS */}
-        {mode === "auto" && betType === "factual" && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>⚡ FINAL SCORE</div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: C.blue, marginBottom: 6 }}>{bet.home_team || "HOME"}</div>
-                <input type="number" placeholder="0" value={score.home} onChange={e => setScore(s => ({...s, home: e.target.value}))}
-                  style={{ width: "100%", padding: "12px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 28, fontFamily: "inherit", outline: "none", textAlign: "center" }} />
-              </div>
-              <div style={{ fontSize: 18, color: C.muted, fontWeight: 700, flexShrink: 0 }}>–</div>
-              <div style={{ flex: 1, textAlign: "center" }}>
-                <div style={{ fontSize: 10, color: C.purple, marginBottom: 6 }}>{bet.away_team || "AWAY"}</div>
-                <input type="number" placeholder="0" value={score.away} onChange={e => setScore(s => ({...s, away: e.target.value}))}
-                  style={{ width: "100%", padding: "12px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.purple}44`, color: C.text, fontSize: 28, fontFamily: "inherit", outline: "none", textAlign: "center" }} />
-              </div>
+        {isWeight && (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>ENTER FINAL WEIGHTS ({weightUnit === "lbs" ? "most lbs lost wins" : "most % lost wins"})</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {participants.map(p => {
+                const g = guessesList.find(x => x.username === p);
+                return (
+                  <div key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, background: C.bg, border: `1px solid ${C.border}` }}>
+                    <span style={{ flex: 1, fontSize: 13, color: C.text, fontWeight: 600 }}>@{p} <span style={{ color: C.muted, fontWeight: 400 }}>· started {g?.start_value ?? "?"}</span></span>
+                    <input type="number" placeholder="Ending weight" value={endValues[p] ?? ""}
+                      onChange={e => setEndValues(v => ({ ...v, [p]: e.target.value }))}
+                      style={{ width: 100, padding: "6px 10px", borderRadius: 8, background: "#0a0c12", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", textAlign: "right" }} />
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* AUTO — WEIGHT */}
-        {mode === "auto" && betType === "weight" && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>⚖️ ENDING WEIGHTS</div>
-            {bet.participants.map((p, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: C.text, width: 90 }}>@{p}</span>
-                <input type="number" placeholder="lbs" onChange={e => setWeights(w => ({...w, [p]: e.target.value}))}
-                  style={{ flex: 1, padding: "8px 12px", borderRadius: 10, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
-                <span style={{ fontSize: 11, color: C.muted }}>lbs</span>
-              </div>
-            ))}
-            <div style={{ fontSize: 11, color: C.muted, marginTop: 4 }}>Machine calculates % lost and picks winner automatically</div>
-          </div>
-        )}
-
-        {/* OVERRIDE / ADMIN — split equally or custom */}
-        {(mode === "override" || betType === "admin") && (
-          <div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-              {[["equal","⚖️ Equal Split"],["custom","✏️ Custom"]].map(([m,l]) => (
-                <button key={m} onClick={() => setSplitMode(m)}
-                  style={{ flex: 1, padding: "8px", borderRadius: 10, border: `1.5px solid ${splitMode===m ? C.green : C.border}`, background: splitMode===m ? C.green+"15" : "transparent", color: splitMode===m ? C.green : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                  {l}
+        {!isGuess && !isWeight && (
+          <>
+            {/* Mode toggle */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+              {[["equal","⚖️ Split Equally"],["custom","✏️ Custom Amounts"]].map(([m, label]) => (
+                <button key={m} onClick={() => setMode(m)}
+                  style={{ flex: 1, padding: "10px 8px", borderRadius: 12, border: `1.5px solid ${mode === m ? C.green : C.border}`, background: mode === m ? C.green+"15" : "transparent", color: mode === m ? C.green : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                  {label}
                 </button>
               ))}
             </div>
-            {splitMode === "equal" && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 10 }}>SELECT WINNER(S)</div>
-                {bet.participants.map(p => {
-                  const isW = winners.includes(p);
-                  const net = isW ? equalPrize - bet.amount : -bet.amount;
-                  return (
-                    <div key={p} onClick={() => toggleWinner(p)}
-                      style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${isW ? C.green : C.border}`, background: isW ? C.green+"10" : C.bg, cursor: "pointer", marginBottom: 8 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${isW ? C.green : C.border}`, background: isW ? C.green : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>{isW ? "✓" : ""}</div>
-                        <span style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>@{p}</span>
+
+            {mode === "equal" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 12 }}>SELECT WINNER(S)</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+                  {participants.map(p => {
+                    const isW = winners.includes(p);
+                    const net = isW ? equalPayout - bet.amount : -bet.amount;
+                    return (
+                      <div key={p} onClick={() => toggleWinner(p)}
+                        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", borderRadius: 12, border: `1.5px solid ${isW ? C.green : C.border}`, background: isW ? C.green+"10" : C.bg, cursor: "pointer" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${isW ? C.green : C.border}`, background: isW ? C.green : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>{isW ? "✓" : ""}</div>
+                          <span style={{ fontSize: 14, color: C.text, fontWeight: 600 }}>@{p}</span>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: net >= 0 ? C.green : C.red }}>{net >= 0 ? "+" : ""}${net}</div>
+                          <div style={{ fontSize: 9, color: C.muted }}>net</div>
+                        </div>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: net >= 0 ? C.green : C.red }}>{net >= 0 ? "+" : ""}${net}</div>
-                        <div style={{ fontSize: 9, color: C.muted }}>net</div>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {winners.length > 0 && (
+                  <div style={{ padding: "12px 14px", background: C.green+"10", border: `1px solid ${C.green}20`, borderRadius: 12, marginBottom: 16, fontSize: 12, color: C.green }}>
+                    {winners.length} winner{winners.length > 1 ? "s" : ""} · ${equalPayout} each (${equalPayout - bet.amount} net)
+                  </div>
+                )}
               </div>
             )}
-            {splitMode === "custom" && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>PRIZE PER PERSON <span style={{ color: customValid ? C.green : C.gold }}>(must = ${pot})</span></div>
-                {bet.participants.map(p => {
-                  const val = Number(customAmounts[p]);
-                  const net = val - bet.amount;
-                  return (
-                    <div key={p} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 10, background: C.bg, border: `1px solid ${C.border}` }}>
-                      <span style={{ flex: 1, fontSize: 13, color: C.text }}>@{p}</span>
-                      <span style={{ color: C.muted }}>$</span>
-                      <input type="number" min="0" value={customAmounts[p]} onChange={e => setCustomAmounts(a => ({...a, [p]: e.target.value}))}
-                        style={{ width: 70, padding: "6px 8px", borderRadius: 8, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", textAlign: "right" }} />
-                      <span style={{ width: 48, textAlign: "right", fontSize: 12, fontWeight: 700, color: net > 0 ? C.green : net < 0 ? C.red : C.muted }}>{net > 0 ? "+" : ""}{net !== 0 ? "$"+net : "–"}</span>
-                    </div>
-                  );
-                })}
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 12px", borderRadius: 10, background: customValid ? C.green+"10" : C.gold+"10", border: `1px solid ${customValid ? C.green : C.gold}30` }}>
-                  <span style={{ fontSize: 12, color: C.muted }}>Total</span>
+
+            {mode === "custom" && (
+              <div>
+                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>SET PAYOUT PER PERSON <span style={{ color: customValid ? C.green : C.gold }}>(Total must = ${pot})</span></div>
+                <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>Enter gross payout (0 = lost their ${bet.amount})</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                  {participants.map(p => {
+                    const val = Number(customAmounts[p]);
+                    const net = val - bet.amount;
+                    return (
+                      <div key={p} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 12, background: C.bg, border: `1px solid ${C.border}` }}>
+                        <span style={{ flex: 1, fontSize: 13, color: C.text, fontWeight: 600 }}>@{p}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 13, color: C.muted }}>$</span>
+                          <input type="number" min="0" value={customAmounts[p]}
+                            onChange={e => setCustomAmounts(a => ({ ...a, [p]: e.target.value }))}
+                            style={{ width: 72, padding: "6px 8px", borderRadius: 8, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", textAlign: "right" }} />
+                        </div>
+                        <div style={{ width: 52, textAlign: "right", fontSize: 12, fontWeight: 700, color: net > 0 ? C.green : net < 0 ? C.red : C.muted }}>
+                          {net > 0 ? "+" : ""}{net !== 0 ? `$${net}` : "–"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, background: customValid ? C.green+"10" : C.gold+"10", border: `1px solid ${customValid ? C.green : C.gold}30`, marginBottom: 16 }}>
+                  <span style={{ fontSize: 12, color: C.muted }}>Total allocated</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: customValid ? C.green : C.gold }}>${customTotal} / ${pot}</span>
                 </div>
               </div>
             )}
-          </div>
+          </>
         )}
 
-        <input placeholder="Optional note..." value={note} onChange={e => setNote(e.target.value)}
-          style={{ width: "100%", padding: "11px 14px", borderRadius: 12, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", marginBottom: 14, boxSizing: "border-box" }} />
+        <input placeholder="Optional note (e.g. 'mikeb and lizz tied')" value={note} onChange={e => setNote(e.target.value)}
+          style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", marginBottom: 16, boxSizing: "border-box" }} />
 
-        {err && <div style={{ fontSize: 12, color: C.red, marginBottom: 12 }}>{err}</div>}
-
-        <button onClick={handleClose} disabled={saving}
-          style={{ width: "100%", padding: 15, borderRadius: 14, border: "none", cursor: saving ? "not-allowed" : "pointer", background: saving ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: saving ? C.muted : "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
-          {saving ? "Settling..." : "🏆 Close Challenge"}
+        <button onClick={handleResolve}
+          disabled={!canSubmit() || saving}
+          style={{ width: "100%", padding: 15, borderRadius: 14, border: "none", cursor: !canSubmit() || saving ? "not-allowed" : "pointer", background: !canSubmit() || saving ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: !canSubmit() || saving ? C.muted : "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
+          {saving ? "Settling..." : "🏆 Settle Bet"}
         </button>
       </div>
     </div>
   );
 }
 
-
-function AdminScreen({ user, onBack }) {
-  const [tab, setTab] = useState("stats");
+function AdminStatsTab() {
   const [stats, setStats] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [bets, setBets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [resetPw, setResetPw] = useState({ userId: null, value: "" });
-  const [closeModal, setCloseModal] = useState(null); // stores full bet object
-  const [closeText, setCloseText] = useState("");
-  const [closeMode, setCloseMode] = useState("auto"); // auto | override
-  const [closeScore, setCloseScore] = useState({ home: "", away: "" });
-  const [closeAnswer, setCloseAnswer] = useState("");
-  const [closeWeights, setCloseWeights] = useState({});
-  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    apiFetch("/admin/stats").then(s => { setStats(s); setLoading(false); }).catch(e => { toastError(e); setLoading(false); });
+  }, []);
+  if (loading) return <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>;
+  if (!stats) return null;
+  const cards = [
+    ["Total Users", stats.totalUsers, C.blue],
+    ["Total Bets", stats.totalBets, C.purple],
+    ["Active Bets", stats.activeBets, C.green],
+    ["$ In Play", "$" + stats.totalInPlay, C.gold],
+    ["Suspended", stats.suspendedUsers, C.red],
+  ];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12 }}>
+      {cards.map(([label, value, color]) => (
+        <div key={label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: "16px 14px", textAlign: "center" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
+          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>{label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  useEffect(() => { loadAll(); }, [tab]);
+function AdminUserRow({ u, onChanged }) {
+  const [resetPw, setResetPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [justReset, setJustReset] = useState(false);
 
-  const loadAll = async () => {
-    setLoading(true);
+  const toggleSuspend = async () => {
+    setBusy(true);
     try {
-      if (tab === "stats" || tab === "users") {
-        const [s, u] = await Promise.all([apiFetch("/admin/stats"), apiFetch("/admin/users")]);
-        setStats(s); setUsers(u);
-      }
-      if (tab === "bets") {
-        const b = await apiFetch("/admin/bets");
-        setBets(b);
-      }
-    } catch(e) { setMsg("Error loading data"); }
-    setLoading(false);
+      await apiFetch(`/admin/users/${u.id}/${u.is_suspended ? "unsuspend" : "suspend"}`, { method: "POST" });
+      onChanged();
+    } catch (e) { toastError(e); setBusy(false); }
   };
 
-  const flash = (m) => { setMsg(m); setTimeout(() => setMsg(""), 3000); };
-
-  const suspendUser = async (id, suspend) => {
+  const doReset = async () => {
+    if (!resetPw || resetPw.length < 6) { toastError({ message: "Password must be at least 6 characters" }); return; }
+    setBusy(true);
     try {
-      await apiFetch(`/admin/users/${id}/${suspend ? "suspend" : "unsuspend"}`, { method: "POST" });
-      flash(suspend ? "User suspended" : "User unsuspended");
-      loadAll();
-    } catch(e) { flash(e.message); }
+      await apiFetch(`/admin/users/${u.id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword: resetPw }) });
+      setResetPw("");
+      setJustReset(true);
+      setTimeout(() => setJustReset(false), 2000);
+    } catch (e) { toastError(e); }
+    setBusy(false);
   };
-
-  const resetPassword = async (id) => {
-    if (!resetPw.value || resetPw.value.length < 6) return flash("Password must be 6+ characters");
-    try {
-      await apiFetch(`/admin/users/${id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword: resetPw.value }) });
-      setResetPw({ userId: null, value: "" });
-      flash("Password reset successfully");
-    } catch(e) { flash(e.message); }
-  };
-
-  const deleteBet = async (id) => {
-    if (!window.confirm("Delete this challenge permanently?")) return;
-    try {
-      await apiFetch(`/admin/bets/${id}`, { method: "DELETE" });
-      flash("Bet deleted");
-      loadAll();
-    } catch(e) { flash(e.message); }
-  };
-
-  const closeBet = async () => {
-    const bet = closeModal;
-    const betType = bet.bet_type || bet.category;
-    try {
-      if (closeMode === "override") {
-        if (!closeText.trim()) return flash("Enter a result description");
-        await apiFetch(`/admin/bets/${bet.id}/close`, { method: "POST", body: JSON.stringify({ result: closeText }) });
-      } else if (betType === "guess") {
-        if (!closeAnswer) return flash("Enter the correct answer");
-        await apiFetch(`/bets/${bet.id}/resolve-guess`, { method: "POST", body: JSON.stringify({ answer: closeAnswer }) });
-      } else if (betType === "weight") {
-        const results = Object.entries(closeWeights).map(([userId, endValue]) => ({ userId: parseInt(userId), endValue: parseFloat(endValue) })).filter(r => !isNaN(r.endValue));
-        if (results.length === 0) return flash("Enter at least one ending weight");
-        await apiFetch(`/bets/${bet.id}/resolve-weight`, { method: "POST", body: JSON.stringify({ results }) });
-      } else if (betType === "factual") {
-        if (!closeScore.home || !closeScore.away) return flash("Enter both scores");
-        const result = `Final score: ${bet.home_team || "Home"} ${closeScore.home} - ${bet.away_team || "Away"} ${closeScore.away}`;
-        await apiFetch(`/admin/bets/${bet.id}/close`, { method: "POST", body: JSON.stringify({ result }) });
-      } else {
-        if (!closeText.trim()) return flash("Enter a result description");
-        await apiFetch(`/admin/bets/${bet.id}/close`, { method: "POST", body: JSON.stringify({ result: closeText }) });
-      }
-      setCloseModal(null); setCloseText(""); setCloseAnswer(""); setCloseScore({home:"",away:""}); setCloseWeights({});
-      flash("Bet closed ✓");
-      loadAll();
-    } catch(e) { flash(e.message); }
-  };
-
-  const T = { th: { fontSize: 10, color: C.muted, letterSpacing: 1, padding: "6px 10px", textAlign: "left", borderBottom: `1px solid ${C.border}` }, td: { fontSize: 12, color: C.text, padding: "10px 10px", borderBottom: `1px solid ${C.border}22`, verticalAlign: "middle" } };
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, padding: "20px 20px 100px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-        <button onClick={onBack} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: "6px 14px", color: C.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>← Back</button>
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 14px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 8 }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: C.text }}>Admin Panel</div>
-          <div style={{ fontSize: 11, color: C.muted }}>You're On — Admin</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>@{u.username} {u.is_admin && <span style={{ color: C.gold, fontSize: 10 }}>👑 ADMIN</span>}</div>
+          <div style={{ fontSize: 10, color: C.muted }}>{u.email} · joined {new Date(u.created_at).toLocaleDateString()} · {u.bets_created} bets created</div>
+        </div>
+        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 20, color: u.is_suspended ? C.red : C.green, background: (u.is_suspended ? C.red : C.green) + "18", border: `1px solid ${(u.is_suspended ? C.red : C.green)}30` }}>
+          {u.is_suspended ? "SUSPENDED" : "ACTIVE"}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {!u.is_admin && (
+          <button onClick={toggleSuspend} disabled={busy}
+            style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${u.is_suspended ? C.green + "40" : C.red + "40"}`, background: u.is_suspended ? C.green + "15" : C.red + "10", color: u.is_suspended ? C.green : C.red, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            {u.is_suspended ? "Unsuspend" : "Suspend"}
+          </button>
+        )}
+        <input type="password" placeholder="New password" value={resetPw} onChange={e => setResetPw(e.target.value)}
+          style={{ flex: 1, minWidth: 100, padding: "6px 10px", borderRadius: 8, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+        <button onClick={doReset} disabled={busy || !resetPw}
+          style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.blue}40`, background: C.blue + "10", color: C.blue, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+          {justReset ? "✓ Reset" : "Reset PW"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminUsersTab() {
+  const [users, setUsers] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const load = () => { setLoading(true); apiFetch("/admin/users").then(u => { setUsers(u); setLoading(false); }).catch(e => { toastError(e); setLoading(false); }); };
+  useEffect(load, []);
+  if (loading) return <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {(users || []).map(u => <AdminUserRow key={u.id} u={u} onChanged={load} />)}
+    </div>
+  );
+}
+
+function AdminSettleModal({ bet, onClose, onSettled }) {
+  const [result, setResult] = useState("");
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await apiFetch(`/admin/bets/${bet.id}/settle`, { method: "POST", body: JSON.stringify({ result: result || "Settled by admin" }) });
+      onSettled(); onClose();
+    } catch (e) { toastError(e); setSaving(false); }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2500, padding: 20 }} onClick={onClose}>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 24, width: "100%", maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 4 }}>Force settle</div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>{bet.title}</div>
+        <input placeholder="Result note (e.g. 'refunded, dispute')" value={result} onChange={e => setResult(e.target.value)}
+          style={{ width: "100%", padding: "10px 12px", borderRadius: 10, background: "#0a0c12", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", marginBottom: 12, boxSizing: "border-box" }} />
+        <div style={{ fontSize: 10, color: C.muted, marginBottom: 16 }}>No winners specified here — this just closes the bet with no balance changes. For payouts, use the normal Settle flow on the bet card.</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 12, borderRadius: 10, background: "transparent", border: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+          <button onClick={submit} disabled={saving} style={{ flex: 1, padding: 12, borderRadius: 10, background: C.gold + "20", border: `1px solid ${C.gold}40`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>{saving ? "..." : "Settle"}</button>
         </div>
       </div>
+    </div>
+  );
+}
 
-      {msg && <div style={{ background: C.green+"20", border: `1px solid ${C.green}40`, borderRadius: 10, padding: "10px 16px", marginBottom: 16, fontSize: 13, color: C.green }}>{msg}</div>}
+function AdminBetsTab() {
+  const [bets, setBets] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [settleTarget, setSettleTarget] = useState(null);
+  const load = () => { setLoading(true); apiFetch("/admin/bets").then(b => { setBets(b); setLoading(false); }).catch(e => { toastError(e); setLoading(false); }); };
+  useEffect(load, []);
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-        {[["stats","📊 Stats"],["users","👥 Users"],["bets","🎯 Bets"]].map(([k,l]) => (
+  const doDelete = async (id) => {
+    try {
+      await apiFetch(`/admin/bets/${id}`, { method: "DELETE" });
+      load();
+    } catch (e) { toastError(e); }
+  };
+
+  if (loading) return <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {settleTarget && <AdminSettleModal bet={settleTarget} onClose={() => setSettleTarget(null)} onSettled={load} />}
+      {(bets || []).map(b => (
+        <div key={b.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "12px 14px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{b.title}</div>
+            <Pill status={b.status} />
+          </div>
+          <div style={{ fontSize: 10, color: C.muted, marginBottom: 8 }}>
+            @{b.creator_name} · {b.bet_type || b.category} · ${b.amount}/person · {b.participant_count} players
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {b.status !== "settled" && (
+              <button onClick={() => setSettleTarget(b)}
+                style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.gold}40`, background: C.gold + "10", color: C.gold, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                Force Settle
+              </button>
+            )}
+            <button onClick={() => doDelete(b.id)}
+              style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${C.red}40`, background: C.red + "10", color: C.red, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminScreen({ onBack }) {
+  const [tab, setTab] = useState("stats");
+  return (
+    <div style={{ padding: "20px 16px 40px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: C.text }}>⚙ Admin</div>
+          <div style={{ fontSize: 11, color: C.muted }}>Manage users and bets</div>
+        </div>
+        <button onClick={onBack} style={{ background: "none", border: `1px solid ${C.border}`, borderRadius: 8, color: C.muted, fontSize: 11, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit" }}>← Back</button>
+      </div>
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, background: C.card, borderRadius: 12, padding: 4 }}>
+        {[["stats", "Stats"], ["users", "Users"], ["bets", "Bets"]].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
-            style={{ padding: "8px 16px", borderRadius: 10, border: `1px solid ${tab===k ? C.blue : C.border}`, background: tab===k ? C.blue+"15" : "transparent", color: tab===k ? C.blue : C.muted, fontWeight: 600, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-            {l}
+            style={{ flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 700, background: tab === k ? C.gold + "20" : "transparent", color: tab === k ? C.gold : C.muted }}>
+            {label}
           </button>
         ))}
       </div>
+      {tab === "stats" && <AdminStatsTab />}
+      {tab === "users" && <AdminUsersTab />}
+      {tab === "bets" && <AdminBetsTab />}
+    </div>
+  );
+}
 
-      {loading && <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading...</div>}
+function JoinPreviewScreen({ betId, currentUser, onLogin, onJoined, onExit }) {
+  const [authMode, setAuthMode] = useState(null); // null | "login" | "signup"
+  const [bet, setBet] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [pick, setPick] = useState("");
+  const [guess, setGuess] = useState("");
+  const [startValue, setStartValue] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joined, setJoined] = useState(false);
 
-      {/* Stats Tab */}
-      {!loading && tab === "stats" && stats && (
-        <div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
-            {[
-              [stats.totalUsers, "Total Users", C.blue],
-              [stats.totalBets, "Total Bets", C.purple],
-              [stats.activeBets, "Active Challenges", C.green],
-              [`$${stats.totalInPlay}`, "$ In Play", C.gold],
-              [stats.suspendedUsers, "Suspended", C.red],
-            ].map(([v,l,c]) => (
-              <div key={l} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: "16px 18px", textAlign: "center" }}>
-                <div style={{ fontSize: 28, fontWeight: 800, color: c }}>{v}</div>
-                <div style={{ fontSize: 10, color: C.muted, letterSpacing: 0.5, marginTop: 4 }}>{l}</div>
-              </div>
-            ))}
-          </div>
+  useEffect(() => {
+    fetch(API + `/bets/${betId}/public`).then(r => r.json()).then(d => {
+      if (d.error) setLoadError(d.error); else setBet(d);
+      setLoading(false);
+    }).catch(() => { setLoadError("Couldn't load this bet"); setLoading(false); });
+  }, [betId]);
+
+  const betCat = (bet && (bet.bet_type || bet.category)) || "";
+  const isFactual = betCat === "factual";
+  const isGuess = betCat === "guess";
+  const isWeight = betCat === "weight";
+  const canJoin = () => {
+    if (!bet) return false;
+    if (isFactual && bet.odds_home) return !!pick;
+    if (isGuess) return !!guess;
+    if (isWeight) return !!startValue;
+    return true;
+  };
+
+  const doJoin = async () => {
+    setJoining(true);
+    try {
+      await apiFetch(`/bets/${betId}/join`, { method: "POST", body: JSON.stringify({ pick: pick || null, guess: guess || null, startValue: startValue || null }) });
+      setJoined(true);
+      setTimeout(() => onJoined(), 1200);
+    } catch (e) { toastError(e); setJoining(false); }
+  };
+
+  if (authMode === "login") return <LoginScreen onLogin={onLogin} onSignup={() => setAuthMode("signup")} onBack={() => setAuthMode(null)} onForgot={() => {}} />;
+  if (authMode === "signup") return <SignupScreen onSignup={onLogin} onLogin={() => setAuthMode("login")} onBack={() => setAuthMode(null)} />;
+
+  if (loading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: C.muted, fontSize: 13 }}>Loading bet...</div>
+    </div>
+  );
+
+  if (loadError || !bet) return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center" }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>🤔</div>
+      <div style={{ fontSize: 15, color: C.text, fontWeight: 700, marginBottom: 8 }}>{loadError || "Bet not found"}</div>
+      <button onClick={onExit} style={{ marginTop: 16, padding: "10px 20px", borderRadius: 12, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, fontFamily: "inherit", cursor: "pointer" }}>Go to FriendlyBets</button>
+    </div>
+  );
+
+  if (joined) return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>🎯</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: C.green }}>You're in!</div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", padding: 24, maxWidth: 480, margin: "0 auto" }}>
+      <div style={{ textAlign: "center", marginTop: 24, marginBottom: 24 }}>
+        <div style={{ fontSize: 40, marginBottom: 8 }}>🤝</div>
+        <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1 }}>YOU'VE BEEN INVITED</div>
+      </div>
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: C.text, marginBottom: 4 }}>{bet.title}</div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>by @{bet.creator_name} · {bet.participant_count} joined</div>
+        {bet.description && <div style={{ fontSize: 13, color: "#9aa0b8", marginBottom: 12 }}>{bet.description}</div>}
+        <div style={{ fontSize: 22, fontWeight: 800, color: C.green }}>${bet.amount} <span style={{ fontSize: 11, color: C.muted, fontWeight: 400 }}>wager</span></div>
+      </div>
+
+      {!currentUser && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <button onClick={() => setAuthMode("signup")} style={{ padding: 15, borderRadius: 14, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${C.green},#00b050)`, color: "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>Sign Up to Join</button>
+          <button onClick={() => setAuthMode("login")} style={{ padding: 15, borderRadius: 14, cursor: "pointer", background: "transparent", border: `1px solid ${C.border}`, color: C.text, fontWeight: 700, fontSize: 15, fontFamily: "inherit" }}>I already have an account</button>
         </div>
       )}
 
-      {/* Users Tab */}
-      {!loading && tab === "users" && (
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["USERNAME","EMAIL","JOINED","BETS","STATUS","ACTIONS"].map(h => (
-                  <th key={h} style={T.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => (
-                <tr key={u.id} style={{ opacity: u.is_suspended ? 0.5 : 1 }}>
-                  <td style={T.td}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontWeight: 600 }}>@{u.username}</span>
-                      {u.is_admin && <span style={{ fontSize: 9, background: C.gold+"25", color: C.gold, padding: "1px 6px", borderRadius: 10, fontWeight: 700 }}>ADMIN</span>}
-                    </div>
-                  </td>
-                  <td style={T.td}><span style={{ color: C.muted }}>{u.email}</span></td>
-                  <td style={T.td}><span style={{ color: C.muted }}>{new Date(u.created_at).toLocaleDateString()}</span></td>
-                  <td style={T.td}>{parseInt(u.bets_created) + parseInt(u.bets_joined)}</td>
-                  <td style={T.td}>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: u.is_suspended ? C.red+"20" : C.green+"20", color: u.is_suspended ? C.red : C.green }}>
-                      {u.is_suspended ? "SUSPENDED" : "ACTIVE"}
-                    </span>
-                  </td>
-                  <td style={T.td}>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {!u.is_admin && (
-                        <button onClick={() => suspendUser(u.id, !u.is_suspended)}
-                          style={{ fontSize: 10, padding: "4px 10px", borderRadius: 8, border: `1px solid ${u.is_suspended ? C.green+"50" : C.red+"50"}`, background: "transparent", color: u.is_suspended ? C.green : C.red, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                          {u.is_suspended ? "Unsuspend" : "Suspend"}
-                        </button>
-                      )}
-                      {resetPw.userId === u.id ? (
-                        <div style={{ display: "flex", gap: 4 }}>
-                          <input value={resetPw.value} onChange={e => setResetPw({userId: u.id, value: e.target.value})} placeholder="New password"
-                            style={{ fontSize: 10, padding: "4px 8px", borderRadius: 8, border: `1px solid ${C.border}`, background: "#0d0f14", color: C.text, width: 100, fontFamily: "inherit" }} />
-                          <button onClick={() => resetPassword(u.id)}
-                            style={{ fontSize: 10, padding: "4px 8px", borderRadius: 8, border: `1px solid ${C.blue}50`, background: "transparent", color: C.blue, cursor: "pointer", fontFamily: "inherit" }}>
-                            Save
-                          </button>
-                          <button onClick={() => setResetPw({userId: null, value: ""})}
-                            style={{ fontSize: 10, padding: "4px 8px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontFamily: "inherit" }}>
-                            ✕
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => setResetPw({userId: u.id, value: ""})}
-                          style={{ fontSize: 10, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, cursor: "pointer", fontFamily: "inherit" }}>
-                          Reset PW
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {currentUser && bet.status === "settled" && (
+        <div style={{ textAlign: "center", color: C.muted, fontSize: 13 }}>This bet has already been settled.</div>
       )}
 
-      {/* Bets Tab */}
-      {!loading && tab === "bets" && (
-        <div>
-          {closeModal && (() => {
-            const bet = closeModal;
-            const betType = bet.bet_type || bet.category;
-            return (
-            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
-              <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 20, padding: 28, maxWidth: 480, width: "100%", maxHeight: "85vh", overflowY: "auto" }}>
-                <div style={{ fontSize: 11, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>FORCE SETTLE</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.text, marginBottom: 4 }}>{bet.title}</div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 20 }}>@{bet.creator_name} · {bet.participant_count} players · ${bet.amount}/person</div>
-
-                {/* Mode toggle */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-                  {[["auto","🤖 Auto Score"],["override","✏️ Manual Override"]].map(([m,l]) => (
-                    <button key={m} onClick={() => setCloseMode(m)}
-                      style={{ flex: 1, padding: "9px 8px", borderRadius: 10, border: `1.5px solid ${closeMode===m ? C.gold : C.border}`, background: closeMode===m ? C.gold+"15" : "transparent", color: closeMode===m ? C.gold : C.muted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                      {l}
+      {currentUser && bet.status !== "settled" && (
+        <>
+          {isFactual && bet.odds_home && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>PICK YOUR SIDE</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[[bet.home_team, bet.odds_home, C.blue],[bet.away_team, bet.odds_away, C.purple]].map(([team, odds, c]) => {
+                  const label = `${team} ${odds}`;
+                  const isSelected = pick === label;
+                  return (
+                    <button key={team} onClick={() => setPick(isSelected ? "" : label)}
+                      style={{ flex: 1, background: isSelected ? c+"20" : "#0d0f14", border: `2px solid ${isSelected ? c : C.border}`, borderRadius: 12, padding: "12px 8px", textAlign: "center", cursor: "pointer", fontFamily: "inherit" }}>
+                      <div style={{ fontSize: 10, color: isSelected ? c : C.muted, marginBottom: 4 }}>{team}</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: isSelected ? c : C.text }}>{odds}</div>
                     </button>
-                  ))}
-                </div>
-
-                {/* AUTO SCORE — GUESS BET */}
-                {closeMode === "auto" && betType === "guess" && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>🫙 ENTER THE CORRECT ANSWER</div>
-                    <input type="number" placeholder="e.g. 847" value={closeAnswer} onChange={e => setCloseAnswer(e.target.value)}
-                      style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 20, fontFamily: "inherit", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
-                    <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Machine will find the closest guess and declare winner automatically</div>
-                  </div>
-                )}
-
-                {/* AUTO SCORE — SPORTS BET */}
-                {closeMode === "auto" && betType === "factual" && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>⚡ ENTER FINAL SCORE</div>
-                    <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: C.blue, marginBottom: 4 }}>{bet.home_team || "HOME"}</div>
-                        <input type="number" placeholder="0" value={closeScore.home} onChange={e => setCloseScore(s => ({...s, home: e.target.value}))}
-                          style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 24, fontFamily: "inherit", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
-                      </div>
-                      <div style={{ fontSize: 20, color: C.muted, fontWeight: 700 }}>vs</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 10, color: C.purple, marginBottom: 4 }}>{bet.away_team || "AWAY"}</div>
-                        <input type="number" placeholder="0" value={closeScore.away} onChange={e => setCloseScore(s => ({...s, away: e.target.value}))}
-                          style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.purple}44`, color: C.text, fontSize: 24, fontFamily: "inherit", outline: "none", boxSizing: "border-box", textAlign: "center" }} />
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Records final score — picks are scored against the spread/moneyline</div>
-                  </div>
-                )}
-
-                {/* AUTO SCORE — WEIGHT BET */}
-                {closeMode === "auto" && betType === "weight" && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>⚖️ ENTER FINAL WEIGHTS</div>
-                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>Machine calculates % or lbs lost and picks winner automatically</div>
-                    {bet.participants_list && bet.participants_list.map && bet.participants_list.map((p, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                        <span style={{ fontSize: 12, color: C.text, width: 80 }}>@{p}</span>
-                        <input type="number" placeholder="ending lbs" 
-                          onChange={e => setCloseWeights(w => ({...w, [p]: e.target.value}))}
-                          style={{ flex: 1, padding: "8px 12px", borderRadius: 10, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 14, fontFamily: "inherit", outline: "none" }} />
-                        <span style={{ fontSize: 11, color: C.muted }}>lbs</span>
-                      </div>
-                    ))}
-                    {(!bet.participants_list || !bet.participants_list.map) && (
-                      <div style={{ fontSize: 12, color: C.muted }}>Load the challenge details to see participants</div>
-                    )}
-                  </div>
-                )}
-
-                {/* AUTO SCORE — ADMIN BET (no auto, show override) */}
-                {closeMode === "auto" && (betType === "admin" || (!betType)) && (
-                  <div style={{ marginBottom: 16, padding: 14, background: C.gold+"10", borderRadius: 10, border: `1px solid ${C.gold}20` }}>
-                    <div style={{ fontSize: 12, color: C.gold }}>👑 Admin-decided bets require Manual Override — switch to that mode above</div>
-                  </div>
-                )}
-
-                {/* MANUAL OVERRIDE */}
-                {closeMode === "override" && (
-                  <div style={{ marginBottom: 16 }}>
-                    <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 8 }}>✏️ RESULT DESCRIPTION</div>
-                    <textarea value={closeText} onChange={e => setCloseText(e.target.value)} 
-                      placeholder="e.g. @marco wins — Lakers won 108-104. @sarah loses."
-                      rows={3}
-                      style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.border}`, color: C.text, fontSize: 13, fontFamily: "inherit", outline: "none", boxSizing: "border-box", resize: "none" }} />
-                    <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>You decide — write any result and it will be saved as-is</div>
-                  </div>
-                )}
-
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button onClick={closeBet}
-                    style={{ flex: 1, padding: 12, borderRadius: 12, background: C.gold+"20", border: `1px solid ${C.gold}40`, color: C.gold, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-                    🏆 Confirm Close
-                  </button>
-                  <button onClick={() => { setCloseModal(null); setCloseText(""); setCloseAnswer(""); setCloseScore({home:"",away:""}); setCloseWeights({}); }}
-                    style={{ flex: 1, padding: 12, borderRadius: 12, background: "transparent", border: `1px solid ${C.border}`, color: C.muted, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
-                    Cancel
-                  </button>
-                </div>
+                  );
+                })}
               </div>
             </div>
-            );
-          })()}
-          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, overflow: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
-              <thead>
-                <tr>
-                  {["BET TITLE","CREATOR","TYPE","AMOUNT","PLAYERS","STATUS","ACTIONS"].map(h => (
-                    <th key={h} style={T.th}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {bets.map(b => (
-                  <tr key={b.id}>
-                    <td style={T.td}><span style={{ fontWeight: 600, maxWidth: 200, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.title}</span></td>
-                    <td style={T.td}><span style={{ color: C.blue }}>@{b.creator_name}</span></td>
-                    <td style={T.td}><span style={{ fontSize: 10, color: C.muted }}>{b.bet_type || b.category}</span></td>
-                    <td style={T.td}>${b.amount}</td>
-                    <td style={T.td}>{b.participant_count}</td>
-                    <td style={T.td}>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 10, background: b.status==="closed" ? C.muted+"20" : b.status==="active" ? C.green+"20" : C.red+"20", color: b.status==="closed" ? C.muted : b.status==="active" ? C.green : C.red }}>
-                        {b.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={T.td}>
-                      <div style={{ display: "flex", gap: 6 }}>
-                        {b.status !== "closed" && (
-                          <button onClick={() => { setCloseModal(b); setCloseMode("auto"); setCloseScore({home:"",away:""}); setCloseAnswer(""); setCloseWeights({}); }}
-                            style={{ fontSize: 10, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.gold}50`, background: "transparent", color: C.gold, cursor: "pointer", fontFamily: "inherit" }}>
-                            Close
-                          </button>
-                        )}
-                        <button onClick={() => deleteBet(b.id)}
-                          style={{ fontSize: 10, padding: "4px 10px", borderRadius: 8, border: `1px solid ${C.red}50`, background: "transparent", color: C.red, cursor: "pointer", fontFamily: "inherit" }}>
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+          )}
+          {isGuess && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR GUESS</div>
+              <input type="number" value={guess} onChange={e => setGuess(e.target.value)} placeholder="Enter your guess"
+                style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.blue}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            </div>
+          )}
+          {isWeight && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: C.muted, letterSpacing: 1, marginBottom: 6 }}>YOUR STARTING WEIGHT</div>
+              <input type="number" value={startValue} onChange={e => setStartValue(e.target.value)} placeholder="e.g. 185"
+                style={{ width: "100%", padding: "12px 14px", borderRadius: 12, background: "#0d0f14", border: `1px solid ${C.gold}44`, color: C.text, fontSize: 16, fontFamily: "inherit", outline: "none", boxSizing: "border-box" }} />
+            </div>
+          )}
+          <button onClick={doJoin} disabled={!canJoin() || joining}
+            style={{ width: "100%", padding: 15, borderRadius: 14, border: "none", cursor: !canJoin() || joining ? "not-allowed" : "pointer", background: !canJoin() || joining ? C.border : `linear-gradient(135deg,${C.green},#00b050)`, color: !canJoin() || joining ? C.muted : "#000", fontWeight: 800, fontSize: 15, fontFamily: "inherit" }}>
+            {joining ? "Joining..." : "✓ Accept & Join"}
+          </button>
+        </>
       )}
     </div>
   );
 }
 
-export default function YoureOn() {
+export default function FriendlyBets() {
   const [authScreen, setAuthScreen] = useState("splash");
   const [currentUser, setCurrentUser] = useState(null);
   const [screen, setScreen] = useState("home");
-  const [showAdmin, setShowAdmin] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [resolveBet, setResolveBet] = useState(null);
   const [booting, setBooting] = useState(true);
+  const [betsVersion, setBetsVersion] = useState(0);
+  const bumpBets = () => setBetsVersion(v => v + 1);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [joinBetId, setJoinBetId] = useState(() => {
+    const m = typeof window !== "undefined" ? window.location.pathname.match(/\/join\/(\d+)/) : null;
+    return m ? m[1] : null;
+  });
+  const exitJoinFlow = () => {
+    setJoinBetId(null);
+    if (typeof window !== "undefined" && window.history) window.history.replaceState({}, "", "/");
+  };
+  const [resetToken, setResetToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    if (!window.location.pathname.startsWith("/reset-password")) return null;
+    return new URLSearchParams(window.location.search).get("token");
+  });
+  const exitResetFlow = () => {
+    setResetToken(null);
+    if (typeof window !== "undefined" && window.history) window.history.replaceState({}, "", "/");
+    setAuthScreen("login");
+  };
+  const isResetPasswordRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/reset-password");
 
   // Auto-login if token exists
   useEffect(() => {
@@ -1792,45 +2151,66 @@ export default function YoureOn() {
   const handleLogout = () => { localStorage.removeItem("fb_token"); setCurrentUser(null); setAuthScreen("splash"); setScreen("home"); };
 
   if (booting) return (
-    <div style={{ width: "100%", minHeight: "100vh", background: "#0d0f14", display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ width: "100%", minHeight: "100vh", background: "#16233a", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 48, marginBottom: 12 }}>🤝</div>
-        <div style={{ fontSize: 14, color: "#4a5068" }}>Loading...</div>
+        <div style={{ fontSize: 14, color: "#ffffff" }}>Loading...</div>
       </div>
     </div>
   );
 
-  const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["history","◈","History"]];
+  const nav = [["home","⬡","Bets"],["live","●","Live"],["invites","✉","Invites"],["friends","🤝","Friends"],["history","◈","History"]];
 
   return (
     <div style={{ maxWidth: 960, margin: "0 auto", minHeight: "100vh", background: C.bg, fontFamily: "'DM Sans',system-ui,sans-serif", color: C.text, position: "relative" }}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap'); *{box-sizing:border-box;margin:0;padding:0} ::-webkit-scrollbar{display:none} input::placeholder,textarea::placeholder{color:#4a5068}`}</style>
+      <ErrorToast />
 
-      {/* Auth screens */}
-      {!currentUser && authScreen === "splash" && <SplashScreen onLogin={() => setAuthScreen("login")} onSignup={() => setAuthScreen("signup")} />}
-      {!currentUser && authScreen === "login" && <LoginScreen onLogin={handleLogin} onSignup={() => setAuthScreen("signup")} onBack={() => setAuthScreen("splash")} />}
-      {!currentUser && authScreen === "signup" && <SignupScreen onSignup={handleLogin} onLogin={() => setAuthScreen("login")} onBack={() => setAuthScreen("splash")} />}
+      {joinBetId && (
+        <JoinPreviewScreen betId={joinBetId} currentUser={currentUser}
+          onLogin={(user) => handleLogin(user)}
+          onJoined={() => { exitJoinFlow(); bumpBets(); }}
+          onExit={exitJoinFlow} />
+      )}
 
-      {/* Main app */}
-      {currentUser && (
+      {!joinBetId && isResetPasswordRoute && (
+        <ResetPasswordScreen token={resetToken} onDone={exitResetFlow} />
+      )}
+
+      {!joinBetId && !isResetPasswordRoute && (
         <>
-          <div style={{ overflowY: "auto", height: "100vh", paddingBottom: 90 }}>
-            {screen === "home" && <HomeScreen user={currentUser} onLogout={handleLogout} onResolve={setResolveBet} />}
-            {screen === "live" && <LiveScreen />}
-            {screen === "invites" && <InvitesScreen />}
-            {screen === "history" && <HistoryScreen />}
-          </div>
-          {showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setScreen("home"); }} />}
-          {resolveBet && <ResolveModal bet={resolveBet} onClose={() => setResolveBet(null)} />}
-          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, width: "100%", background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 24px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100, maxWidth: 960, margin: "0 auto" }}>
-            {nav.map(([k,icon,label]) => (
-              <button key={k} onClick={() => setScreen(k)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 4px", borderRadius: 12, border: "none", cursor: "pointer", background: screen===k ? C.green+"10" : "transparent", color: screen===k ? C.green : C.muted, fontFamily: "inherit" }}>
-                <span style={{ fontSize: 18 }}>{icon}</span>
-                <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>{label}</span>
-              </button>
-            ))}
-            <button onClick={() => setShowCreate(true)} style={{ width: 52, height: 52, borderRadius: "50%", border: "none", cursor: "pointer", background: `linear-gradient(135deg,${C.green},#00b050)`, color: "#000", fontSize: 26, fontWeight: 700, flexShrink: 0, boxShadow: `0 4px 20px ${C.green}40`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>+</button>
-          </div>
+          {/* Auth screens */}
+          {!currentUser && authScreen === "splash" && <SplashScreen onLogin={() => setAuthScreen("login")} onSignup={() => setAuthScreen("signup")} />}
+          {!currentUser && authScreen === "login" && <LoginScreen onLogin={handleLogin} onSignup={() => setAuthScreen("signup")} onBack={() => setAuthScreen("splash")} onForgot={() => setAuthScreen("forgot")} />}
+          {!currentUser && authScreen === "signup" && <SignupScreen onSignup={handleLogin} onLogin={() => setAuthScreen("login")} onBack={() => setAuthScreen("splash")} />}
+          {!currentUser && authScreen === "forgot" && <ForgotPasswordScreen onBack={() => setAuthScreen("login")} />}
+
+          {/* Main app */}
+          {currentUser && (
+            <>
+              <div style={{ overflowY: "auto", height: "100vh", paddingBottom: showAdmin ? 24 : 90 }}>
+                {showAdmin && <AdminScreen onBack={() => setShowAdmin(false)} />}
+                {!showAdmin && screen === "home" && <HomeScreen user={currentUser} onLogout={handleLogout} onResolve={setResolveBet} refreshSignal={betsVersion} onOpenAdmin={() => setShowAdmin(true)} />}
+                {!showAdmin && screen === "live" && <LiveScreen refreshSignal={betsVersion} />}
+                {!showAdmin && screen === "invites" && <InvitesScreen />}
+                {!showAdmin && screen === "friends" && <FriendsScreen />}
+                {!showAdmin && screen === "history" && <HistoryScreen refreshSignal={betsVersion} />}
+              </div>
+              {!showAdmin && showCreate && <CreateModal onClose={() => setShowCreate(false)} onCreated={() => { setShowCreate(false); setScreen("home"); bumpBets(); }} />}
+              {!showAdmin && resolveBet && <ResolveModal bet={resolveBet} onClose={() => setResolveBet(null)} onSettled={bumpBets} />}
+              {!showAdmin && (
+                <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, width: "100%", background: "rgba(13,15,20,0.97)", borderTop: `1px solid ${C.border}`, backdropFilter: "blur(20px)", padding: "8px 24px 24px", display: "flex", alignItems: "center", gap: 2, zIndex: 100, maxWidth: 960, margin: "0 auto" }}>
+                  {nav.map(([k,icon,label]) => (
+                    <button key={k} onClick={() => setScreen(k)} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "8px 4px", borderRadius: 12, border: "none", cursor: "pointer", background: screen===k ? C.green+"10" : "transparent", color: screen===k ? C.green : C.muted, fontFamily: "inherit" }}>
+                      <span style={{ fontSize: 18 }}>{icon}</span>
+                      <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>{label}</span>
+                    </button>
+                  ))}
+                  <button onClick={() => setShowCreate(true)} style={{ width: 52, height: 52, borderRadius: "50%", border: "none", cursor: "pointer", background: `linear-gradient(135deg,${C.green},#00b050)`, color: "#000", fontSize: 26, fontWeight: 700, flexShrink: 0, boxShadow: `0 4px 20px ${C.green}40`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>+</button>
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
